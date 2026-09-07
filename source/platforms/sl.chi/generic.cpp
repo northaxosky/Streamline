@@ -24,6 +24,7 @@
 #include <d3d12.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
+#include <wrl/client.h>
 #endif // defined(SL_WINDOWS)
 #define __STDC_FORMAT_MACROS 1
 #include <cinttypes>
@@ -348,14 +349,12 @@ ComputeStatus Generic::clearCache()
 
 ComputeStatus Generic::getVendorId(VendorId& id)
 {
-    IDXGIDevice* dxgiDevice{};
-    if (SUCCEEDED(((IUnknown*)m_typelessDevice)->QueryInterface(&dxgiDevice)))
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    if (SUCCEEDED(((IUnknown*)m_typelessDevice)->QueryInterface(dxgiDevice.GetAddressOf())))
     {
-        dxgiDevice->Release();
-        IDXGIAdapter* adapter{};
-        if (SUCCEEDED(dxgiDevice->GetAdapter(&adapter)))
+        Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+        if (SUCCEEDED(dxgiDevice->GetAdapter(adapter.GetAddressOf())))
         {
-            adapter->Release();
             DXGI_ADAPTER_DESC desc;
             if (SUCCEEDED(adapter->GetDesc(&desc)))
             {
