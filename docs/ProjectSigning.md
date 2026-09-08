@@ -58,11 +58,14 @@ Wine and Proton report mapped files as their original NT-DOS
 identified through its `ntdll` export, the verifier accepts only a canonical
 absolute drive form, reopens that exact loader-compatible name, requires a
 nonzero volume identity and matching file ID, and retains both restrictive
-handles through the load. Wine enforces those share restrictions for processes
-inside the prefix. Native host processes that can rewrite the prefix filesystem
-are outside the trusted-host boundary, and USVFS path rewriting under Proton
-still requires runtime qualification. Unsupported Wine namespaces and
-identities fail closed without changing the native Windows path policy. The initial bounded
+handles through the load. This provides package authentication, checked file
+identity, and direct target-file locking inside a trusted Wine prefix. It does
+not provide end-to-end namespace binding against another same-user Wine or
+native process that concurrently rewrites drive mappings, ancestor paths, or
+the prefix filesystem. Unsupported Wine namespaces and identities fail closed
+without changing the stronger native Windows path policy. Actual
+`WinVerifyTrust`, `LoadLibraryExW`, and USVFS/MO2 behavior under Proton remains a
+runtime qualification requirement. The initial bounded
 implementation revalidates the selected package for each plugin load rather
 than retaining a process-lifetime cache; this keeps resolver and file-identity
 semantics simple at the cost of additional startup-only I/O.
@@ -99,6 +102,22 @@ Names must be strictly sorted and unique, lowercase, and contain no path
 separator, drive marker, `..`, absolute path, or case ambiguity. Unknown
 versions, roles, key IDs, trailing bytes, truncation, and overflow are rejected.
 The compiled trust policy also requires one exact release ID.
+
+## Wine qualification
+
+Run `tests/run-regressions.ps1` from a Visual Studio developer shell to create
+the ignored `_artifacts/tests/project-trust` fixture bundle. From that directory
+a Wine tester can exercise the real combined authentication and DLL-load path:
+
+```text
+wine project-trust-regression.exe fixture cases unmanifested missing tampered-size tampered-hash
+```
+
+Record the Wine/Proton version, whether MO2/USVFS is active, GPU, runtime folder,
+test output, and Streamline authentication logs. A passing fixture demonstrates
+the verifier and loader gate only; DLSS and frame-generation behavior require
+separate game-level testing. MO2 qualification must also confirm that the
+selected logical winner reaches the expected authenticated backing file.
 
 ## Release automation
 

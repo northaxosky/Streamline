@@ -36,8 +36,8 @@ namespace sl::security
 // LoadLibraryExW, and boundLoadHandle remains open so the caller can retain the
 // identity check through the load. The caller owns boundLoadHandle.
 // On Wine, the loader accepts the exact NT-DOS name recorded for the opened
-// file. Restrictive Wine handles protect the object from in-prefix replacement,
-// but native host processes remain outside that enforcement boundary.
+// file. This authenticates the selected object in a trusted prefix but cannot
+// prevent another same-user Wine or native process from rebinding that name.
 bool getPhysicalFilePaths(
     HANDLE file,
     std::wstring& identityPath,
