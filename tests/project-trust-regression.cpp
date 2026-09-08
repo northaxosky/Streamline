@@ -1,6 +1,9 @@
+#include "source/core/sl.security/physicalFilePath.h"
 #include "source/core/sl.security/projectTrust.h"
 #include "source/core/sl.security/secureLoadLibrary.h"
 
+#include <cwchar>
+#include <cwctype>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -90,12 +93,14 @@ struct ReplacementAttempt
 {
     bool writeBlocked{};
     bool renameBlocked{};
+    fs::path physicalPath;
 };
 
 void attemptReplacement(void* context, std::wstring_view physicalPath)
 {
     auto& attempt = *static_cast<ReplacementAttempt*>(context);
     const std::wstring path(physicalPath);
+    attempt.physicalPath = path;
     HANDLE write = CreateFileW(
         path.c_str(), GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -114,6 +119,90 @@ void attemptReplacement(void* context, std::wstring_view physicalPath)
     {
         MoveFileExW(replacement.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
     }
+}
+
+void checkDosAliasBinding(const fs::path& fixture)
+{
+    const fs::path absolute = fs::absolute(fixture);
+    const std::wstring sourceDrive = absolute.root_name().wstring();
+    if (sourceDrive.size() != 2 || sourceDrive[1] != L':')
+    {
+        return;
+    }
+
+    wchar_t aliasLetter{};
+    for (const wchar_t candidate : { L'B', L'A' })
+    {
+        const std::wstring aliasRoot{ candidate, L':', L'\\' };
+        if (candidate != sourceDrive[0] &&
+            GetDriveTypeW(aliasRoot.c_str()) == DRIVE_NO_ROOT_DIR)
+        {
+            aliasLetter = candidate;
+            break;
+        }
+    }
+    if (!aliasLetter)
+    {
+        return;
+    }
+
+    std::wstring device(32768, L'\0');
+    if (!QueryDosDeviceW(
+        sourceDrive.c_str(), device.data(),
+        static_cast<DWORD>(device.size())))
+    {
+        check(false, "source volume device name is available for alias test");
+        return;
+    }
+    device.resize(std::wcslen(device.c_str()));
+    const std::wstring target =
+        device + absolute.parent_path().wstring().substr(2);
+    const std::wstring alias{ aliasLetter, L':' };
+    constexpr DWORD defineFlags =
+        DDD_RAW_TARGET_PATH | DDD_NO_BROADCAST_SYSTEM;
+    if (!DefineDosDeviceW(defineFlags, alias.c_str(), target.c_str()))
+    {
+        check(false, "hostile DOS alias can be installed for binding test");
+        return;
+    }
+
+    HANDLE raw = CreateFileW(
+        absolute.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    std::wstring identityPath;
+    std::wstring loadPath;
+    HANDLE boundLoadHandle = INVALID_HANDLE_VALUE;
+    DWORD systemError{};
+    const bool resolved = raw != INVALID_HANDLE_VALUE &&
+        getPhysicalFilePaths(
+            raw, identityPath, loadPath,
+            boundLoadHandle, systemError);
+    if (boundLoadHandle != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(boundLoadHandle);
+    }
+    if (raw != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(raw);
+    }
+    const DWORD removeFlags = defineFlags |
+        DDD_REMOVE_DEFINITION | DDD_EXACT_MATCH_ON_REMOVE;
+    check(
+        DefineDosDeviceW(
+            removeFlags, alias.c_str(), target.c_str()) != FALSE,
+        "hostile DOS alias is removed after binding test");
+
+    check(resolved, "physical path resolves while a hostile DOS alias exists");
+    check(
+        loadPath.size() < 2 ||
+        towupper(loadPath[0]) != aliasLetter ||
+        loadPath[1] != L':',
+        "physical path does not use an attacker-controlled DOS alias");
+    std::error_code equivalentError;
+    check(
+        resolved && fs::equivalent(loadPath, absolute, equivalentError) &&
+        !equivalentError,
+        "alias-resistant physical path retains the authenticated file identity");
 }
 
 }
@@ -138,6 +227,7 @@ int wmain(int argc, wchar_t** argv)
     const fs::path qualificationRoot = argc == 8 ? argv[7] : L"";
     const auto& trust = getCompiledProjectTrust();
     check(trust.configured, "ephemeral test trust is compiled into the test executable");
+    checkDosAliasBinding(fixtureRoot / "sl.interposer.dll");
 
     const fs::path validManifest = cases / "valid.bin";
     const fs::path validSignature = cases / "valid.sig";
@@ -173,6 +263,14 @@ int wmain(int argc, wchar_t** argv)
     check(static_cast<bool>(held), "DLL loads while its authenticated handle is held");
     check(replacement.writeBlocked, "held handle blocks write replacement");
     check(replacement.renameBlocked, "held handle blocks rename/delete replacement");
+    std::error_code equivalentError;
+    check(
+        fs::equivalent(
+            replacement.physicalPath,
+            fixtureRoot / "sl.interposer.dll",
+            equivalentError) &&
+        !equivalentError,
+        "load path names the backing file mapped from the authenticated handle");
     if (held.module)
     {
         FreeLibrary(held.module);
@@ -267,6 +365,19 @@ int wmain(int argc, wchar_t** argv)
     {
         HMODULE nvidiaModule = loadLibrary(
             (qualificationRoot / "sl.dlss_g.dll").c_str(), &wrapperFailure);
+        if (!nvidiaModule)
+        {
+            const ProjectLoadResult diagnostic =
+                authenticateAndLoadNvidiaLibrary(
+                    (qualificationRoot / "sl.dlss_g.dll").wstring());
+            std::cerr << "NVIDIA-only load failed with trust result "
+                << getTrustFailureMessage(wrapperFailure)
+                << " and system error " << diagnostic.systemError << '\n';
+            if (diagnostic.module)
+            {
+                FreeLibrary(diagnostic.module);
+            }
+        }
         check(
             nvidiaModule && wrapperFailure == TrustFailure::eOk,
             "available original NVIDIA DLL is accepted without a project manifest");

@@ -23,6 +23,7 @@
 #include "source/core/sl.security/projectTrust.h"
 
 #include "include/sl_security.h"
+#include "source/core/sl.security/physicalFilePath.h"
 
 #include <algorithm>
 #include <bcrypt.h>
@@ -120,7 +121,9 @@ struct ParsedManifest
 struct OpenedFile
 {
     UniqueHandle handle;
-    std::wstring fullPath;
+    UniqueHandle boundLoadHandle;
+    std::wstring identityPath;
+    std::wstring loadPath;
 };
 
 ProjectLoadResult fail(TrustFailure failure, DWORD systemError = 0)
@@ -345,23 +348,14 @@ TrustFailure openRestricted(std::wstring_view path, OpenedFile& opened, DWORD& s
     }
     opened.handle.reset(raw);
 
-    DWORD length = GetFinalPathNameByHandleW(
-        raw, nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    if (!length)
+    HANDLE boundLoadHandle = INVALID_HANDLE_VALUE;
+    if (!getPhysicalFilePaths(
+        raw, opened.identityPath, opened.loadPath,
+        boundLoadHandle, systemError))
     {
-        systemError = GetLastError();
         return TrustFailure::eFileOpenFailed;
     }
-    std::wstring fullPath(length, L'\0');
-    const DWORD copied = GetFinalPathNameByHandleW(
-        raw, fullPath.data(), length, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    if (!copied || copied >= length)
-    {
-        systemError = GetLastError();
-        return TrustFailure::eFileOpenFailed;
-    }
-    fullPath.resize(copied);
-    opened.fullPath = std::move(fullPath);
+    opened.boundLoadHandle.reset(boundLoadHandle);
     return TrustFailure::eOk;
 }
 
@@ -608,7 +602,7 @@ ProjectLoadResult authenticateAndLoadNvidiaLibrary(
     {
         return fail(failure, systemError);
     }
-    if (!verifyNvidiaEmbeddedSignature(opened.fullPath.c_str()))
+    if (!verifyNvidiaEmbeddedSignature(opened.identityPath.c_str()))
     {
         return fail(TrustFailure::eNvidiaSignatureInvalid);
     }
@@ -617,7 +611,7 @@ ProjectLoadResult authenticateAndLoadNvidiaLibrary(
         return { TrustFailure::eOk, 0, nullptr };
     }
     HMODULE module = LoadLibraryExW(
-        opened.fullPath.c_str(), nullptr,
+        opened.loadPath.c_str(), nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!module)
     {
@@ -752,7 +746,7 @@ ProjectLoadResult authenticateAndLoadProjectLibrary(const ProjectLoadOptions& op
             return fail(TrustFailure::eFileHashMismatch);
         }
         if (entry.role == ProjectFileRole::eNvidiaModule &&
-            !verifyNvidiaEmbeddedSignature(opened.fullPath.c_str()))
+            !verifyNvidiaEmbeddedSignature(opened.identityPath.c_str()))
         {
             return fail(TrustFailure::eNvidiaSignatureInvalid);
         }
@@ -773,7 +767,7 @@ ProjectLoadResult authenticateAndLoadProjectLibrary(const ProjectLoadOptions& op
 
     const auto index = static_cast<size_t>(
         requestedEntry - parsed.entries.data());
-    const std::wstring& requestedPath = openedFiles[index].fullPath;
+    const std::wstring& requestedPath = openedFiles[index].loadPath;
     if (options.beforeLoad)
     {
         options.beforeLoad(options.beforeLoadContext, requestedPath);
