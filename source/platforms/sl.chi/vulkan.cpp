@@ -29,6 +29,7 @@
 
 #include "external/nsight-sdk/SystemsGraphics/include/NGFX_Vulkan.h"
 #include "external/nsight-sdk/SystemsGraphics/include/NGFX_GraphicsCapture_Vulkan.h"
+#include "external/nsight-sdk/SystemsGraphics/include/NGFX_GPUTrace_Vulkan.h"
 #include "external/nsight-sdk/SystemsGraphics/include/NGFX_SystemProfiling_Vulkan.h"
 
 // Swap chain private data requires Vulkan 1.3 (VkPrivateDataSlot, VK_OBJECT_TYPE_SWAPCHAIN_KHR, vkSet/GetPrivateData).
@@ -43,13 +44,7 @@ inline constexpr auto ngfxFrameBoundaryType(bool isGenerated, bool isBegin)
         : (isBegin ? NGFX_For_Dlss_DLSS_FG_PresentBoundaryType_Real_Frame_Begin : NGFX_For_Dlss_DLSS_FG_PresentBoundaryType_Real_Frame_End);
 }
 
-// Errors are negative so don't check for VK_SUCCESS only since there are other 'non fatal' values > 0, we show them as warnings
-#define VK_CHECK(f) {auto _r = f;if(_r < 0){SL_LOG_ERROR("%s failed - error %d",#f,_r); return ComputeStatus::eError;} else if(_r != 0) {SL_LOG_WARN("%s - warning %d",#f,_r);}}
-#define VK_CHECK_RV(f) {auto _r = f;if(_r < 0){SL_LOG_ERROR("%s failed - error %d",#f,_r); return;} else if(_r != 0) {SL_LOG_WARN("%s - warning %d",#f,_r);}}
-#define VK_CHECK_RF(f) {auto _r = f;if(_r < 0){SL_LOG_ERROR("%s failed - error %d",#f,_r); return false;} else if(_r != 0) {SL_LOG_WARN("%s - warning %d",#f,_r);}}
-#define VK_CHECK_RN(f) {auto _r = f;if(_r < 0){SL_LOG_ERROR("%s failed - error %d",#f,_r); return nullptr;} else if(_r != 0) {SL_LOG_WARN("%s - warning %d",#f,_r);}}
-#define VK_CHECK_RE(res, f) res = f;if(res < 0){SL_LOG_ERROR("%s failed - error %d",#f,res); return res;} else if(res != 0) {SL_LOG_WARN("%s - warning %d",#f,res);}
-#define VK_CHECK_RWS(f) {auto _r = f;if(_r < 0){SL_LOG_ERROR("%s failed - error %d",#f,_r); return WaitStatus::eError;} else if(_r == VK_TIMEOUT) {SL_LOG_WARN("%s - timed out", #f); return WaitStatus::eTimeout;}}
+// VK_CHECK_* macros now live in source/platforms/sl.chi/vulkan.h so vknvll2.cpp can use them too.
 
 #define CHECK_REFLEX() do { if (!m_reflex){ SL_LOG_WARN_ONCE("No reflex"); return ComputeStatus::eError; } } while(false)
 
@@ -219,6 +214,11 @@ class CommandListContextVK : public ICommandListContext
     VkLayerDispatchTable m_ddt;
     interposer::VkTable* m_vk;
 
+    // Submit SL's own work via vkQueueSubmit2 when synchronization2 is enabled on the device (and the
+    // entry point resolved); otherwise fall back to the v1 vkQueueSubmit. Calling vkQueueSubmit2 without
+    // synchronization2 enabled is a spec violation, so both conditions must hold. Set in init().
+    bool m_useSync2 = false;
+
     ICompute* m_compute = {};
     VkQueue m_cmdQueue;
     VkSemaphore m_presentSemaphore{};
@@ -239,17 +239,24 @@ class CommandListContextVK : public ICommandListContext
     std::mutex m_mtxQueueList;
     std::mutex m_mtxSyncGPU;
 
+    // Reflex/LL2: app frame id stamped onto this context's work submits via VkLatencySubmissionPresentIdNV
+    // (see setLatencyFrameId / executeCommandList). 0 means "no frame, leave untagged". Written by the
+    // caller's frame thread just before its submits and read on the same thread at submit time; atomic
+    // only to keep it well-defined if a flush ever submits from another thread.
+    std::atomic<uint64_t> m_latencyFrameId{ 0 };
+
     // Keep validation layer happy
     const VkPipelineStageFlags waitDstStageMask[4] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT , VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
 
 public:
 
-    void init(ICompute* c, interposer::VkTable* vkMap, const char* debugName, VkDevice dev, CommandQueueVk* queue, uint32_t count)
+    void init(ICompute* c, interposer::VkTable* vkMap, const char* debugName, VkDevice dev, CommandQueueVk* queue, uint32_t count, bool sync2Enabled)
     {
         m_compute = c;
         m_device = dev;
         m_vk = vkMap;
         m_ddt = m_vk->dispatchDeviceMap[dev];
+        m_useSync2 = sync2Enabled && m_ddt.QueueSubmit2 != nullptr;
         m_name = extra::utf8ToUtf16(debugName);
         m_cmdQueue = (VkQueue)queue->native;
         m_bufferCount = count;
@@ -259,7 +266,7 @@ public:
         m_allocators.resize(m_bufferCount);
         m_fence.resize(m_bufferCount);
         m_fenceValue.resize(m_bufferCount);
-    
+
         VkSemaphoreCreateInfo createInfo;
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         createInfo.pNext = {};
@@ -290,7 +297,7 @@ public:
             m_compute->setDebugName(&r, name.str().c_str());
         }
 
-        SL_LOG_INFO("Creating command context %s - cmd buffers %u", debugName, m_bufferCount);
+        SL_LOG_INFO("Creating command context %s - cmd buffers %u - submit path %s", debugName, m_bufferCount, m_useSync2 ? "vkQueueSubmit2" : "vkQueueSubmit");
 
         for (uint32_t i = 0; i < m_bufferCount; i++)
         {
@@ -363,6 +370,16 @@ public:
         return m_cmdQueue;
     }
 
+    void setLatencyFrameId(uint64_t frameId) override
+    {
+        // Ignore 0 ("no frame"): keep the last real frame id so a frame-less present still rides the
+        // most recent attribution rather than going untagged. executeCommandList chains it per submit.
+        if (frameId != 0)
+        {
+            m_latencyFrameId.store(frameId, std::memory_order_relaxed);
+        }
+    }
+
     CommandAllocator getCmdAllocator()
     {
         return m_allocators[m_index].getCmdAllocator();
@@ -404,6 +421,69 @@ public:
         return m_cmdListIsRecording;
     }
 
+    // Submit SL's own work to m_cmdQueue, choosing vkQueueSubmit2 (when m_useSync2) or the v1
+    // vkQueueSubmit. Timeline wait/signal values align by index with waitSemaphores/signalSemaphores.
+    // cmdBuffer may be VK_NULL_HANDLE (no command buffer). latencyInfo, when non-null, carries the
+    // Reflex/LL2 frame-attribution chain - on Sync2 it chains onto VkSubmitInfo2, on v1 onto the
+    // timeline submit info; both reach the driver identically. Returns the raw VkResult so callers
+    // keep their existing VK_CHECK_* return semantics.
+    VkResult submitToQueue(VkCommandBuffer cmdBuffer,
+        const std::vector<chi::Fence>& waitSemaphores, const std::vector<uint64_t>& waitValues,
+        const std::vector<chi::Fence>& signalSemaphores, const std::vector<uint64_t>& signalValues,
+        const VkLatencySubmissionPresentIdNV* latencyInfo, VkFence fence)
+    {
+        if (m_useSync2)
+        {
+            std::vector<VkSemaphoreSubmitInfo> waitInfos(waitSemaphores.size());
+            for (size_t i = 0; i < waitSemaphores.size(); i++)
+            {
+                waitInfos[i] = { VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+                waitInfos[i].semaphore = (VkSemaphore)waitSemaphores[i];
+                waitInfos[i].value = i < waitValues.size() ? waitValues[i] : 0; // ignored for binary semaphores
+                waitInfos[i].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            }
+            std::vector<VkSemaphoreSubmitInfo> signalInfos(signalSemaphores.size());
+            for (size_t i = 0; i < signalSemaphores.size(); i++)
+            {
+                signalInfos[i] = { VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+                signalInfos[i].semaphore = (VkSemaphore)signalSemaphores[i];
+                signalInfos[i].value = i < signalValues.size() ? signalValues[i] : 0; // ignored for binary semaphores
+                signalInfos[i].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            }
+            VkCommandBufferSubmitInfo cmdInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+            cmdInfo.commandBuffer = cmdBuffer;
+
+            VkSubmitInfo2 submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+            submitInfo.pNext = latencyInfo;
+            submitInfo.waitSemaphoreInfoCount = (uint32_t)waitInfos.size();
+            submitInfo.pWaitSemaphoreInfos = waitInfos.data();
+            submitInfo.commandBufferInfoCount = cmdBuffer != VK_NULL_HANDLE ? 1u : 0u;
+            submitInfo.pCommandBufferInfos = cmdBuffer != VK_NULL_HANDLE ? &cmdInfo : nullptr;
+            submitInfo.signalSemaphoreInfoCount = (uint32_t)signalInfos.size();
+            submitInfo.pSignalSemaphoreInfos = signalInfos.data();
+            return m_ddt.QueueSubmit2(m_cmdQueue, 1, &submitInfo, fence);
+        }
+
+        VkTimelineSemaphoreSubmitInfo timelineInfo = { VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO };
+        timelineInfo.pNext = latencyInfo;
+        timelineInfo.waitSemaphoreValueCount = (uint32_t)waitValues.size();
+        timelineInfo.pWaitSemaphoreValues = waitValues.data();
+        timelineInfo.signalSemaphoreValueCount = (uint32_t)signalValues.size();
+        timelineInfo.pSignalSemaphoreValues = signalValues.data();
+
+        VkSubmitInfo submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = &timelineInfo;
+        submitInfo.waitSemaphoreCount = (uint32_t)waitSemaphores.size();
+        submitInfo.pWaitSemaphores = (VkSemaphore*)waitSemaphores.data();
+        submitInfo.signalSemaphoreCount = (uint32_t)signalSemaphores.size();
+        submitInfo.pSignalSemaphores = (VkSemaphore*)signalSemaphores.data();
+        submitInfo.commandBufferCount = cmdBuffer != VK_NULL_HANDLE ? 1u : 0u;
+        submitInfo.pCommandBuffers = cmdBuffer != VK_NULL_HANDLE ? &cmdBuffer : nullptr;
+        submitInfo.pWaitDstStageMask = waitDstStageMask;
+        return m_ddt.QueueSubmit(m_cmdQueue, 1, &submitInfo, fence);
+    }
+
     bool executeCommandList(const GPUSyncInfo* info)
     {
         if (!m_cmdListIsRecording)
@@ -440,25 +520,26 @@ public:
             }
         }
 
-        VkTimelineSemaphoreSubmitInfo timelineInfo;
-        timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-        timelineInfo.pNext = NULL;
-        timelineInfo.waitSemaphoreValueCount = (uint32_t)waitValues.size();
-        timelineInfo.pWaitSemaphoreValues = waitValues.data();
-        timelineInfo.signalSemaphoreValueCount = (uint32_t)signalValues.size();
-        timelineInfo.pSignalSemaphoreValues = signalValues.data();
+        // Reflex/LL2 explicit frame attribution: when SL tags, chain VkLatencySubmissionPresentIdNV
+        // onto THIS submit so its frame id is unambiguous. Tagging the work submit directly - rather
+        // than relying on the driver's "reuse last non-zero presentID on this queue" rule - removes
+        // the race where another submitter (e.g. the app sharing this queue) changes the queue's last
+        // id between our tag and our real submit. Frame id 0 means "no frame" and stays untagged.
+        // This path is currently dormant: areLatencyIdsEnabled() always returns false (see
+        // ICompute::areLatencyIdsEnabled), so SL never tags until app-tagging detection exists.
+        VkLatencySubmissionPresentIdNV latencyInfo{};
+        const VkLatencySubmissionPresentIdNV* pLatencyInfo = nullptr;
+        const uint64_t latencyFrameId = m_latencyFrameId.load(std::memory_order_relaxed);
+        if (latencyFrameId != 0 && m_compute->areLatencyIdsSupported() && m_compute->areLatencyIdsEnabled())
+        {
+            latencyInfo.sType = VK_STRUCTURE_TYPE_LATENCY_SUBMISSION_PRESENT_ID_NV;
+            latencyInfo.pNext = nullptr;
+            latencyInfo.presentID = latencyFrameId;
+            pLatencyInfo = &latencyInfo;
+        }
 
-        VkSubmitInfo submitInfo = {};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = &timelineInfo;
-        submitInfo.waitSemaphoreCount = (uint32_t)waitSemaphores.size();
-        submitInfo.pWaitSemaphores = (VkSemaphore*)waitSemaphores.data();
-        submitInfo.signalSemaphoreCount = (uint32_t)signalSemaphores.size();
-        submitInfo.pSignalSemaphores = (VkSemaphore*)signalSemaphores.data();
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuffer;
-        submitInfo.pWaitDstStageMask = waitDstStageMask;
-        VK_CHECK_RF(m_ddt.QueueSubmit(m_cmdQueue, 1, &submitInfo, info ? (VkFence)info->fence : nullptr));
+        VK_CHECK_RF(submitToQueue(cmdBuffer, waitSemaphores, waitValues, signalSemaphores, signalValues,
+            pLatencyInfo, info ? (VkFence)info->fence : VK_NULL_HANDLE));
 
         //SL_LOG_INFO("Submitting on %S index %u value %llu", name.c_str(), index, syncValue);
 
@@ -581,23 +662,8 @@ public:
             signalValues.insert(signalValues.end(), info->signalValues.begin(), info->signalValues.end());
         }
 
-        VkTimelineSemaphoreSubmitInfo timelineInfo{};
-        timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-        timelineInfo.pNext = NULL;
-        timelineInfo.waitSemaphoreValueCount = (uint32_t)waitValues.size();
-        timelineInfo.pWaitSemaphoreValues = waitValues.data();
-        timelineInfo.signalSemaphoreValueCount = (uint32_t)signalValues.size();
-        timelineInfo.pSignalSemaphoreValues = signalValues.data();
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = &timelineInfo;
-        submitInfo.waitSemaphoreCount = (uint32_t)waitSemaphores.size();
-        submitInfo.pWaitSemaphores = (VkSemaphore*)waitSemaphores.data();
-        submitInfo.signalSemaphoreCount = (uint32_t)signalSemaphores.size();
-        submitInfo.pSignalSemaphores = (VkSemaphore*)signalSemaphores.data();
-        submitInfo.pWaitDstStageMask = waitDstStageMask;
-        VK_CHECK_RV(m_ddt.QueueSubmit(m_cmdQueue, 1, &submitInfo, info ? (VkFence)info->fence : VK_NULL_HANDLE));
+        VK_CHECK_RV(submitToQueue(VK_NULL_HANDLE, waitSemaphores, waitValues, signalSemaphores, signalValues,
+            nullptr, info ? (VkFence)info->fence : VK_NULL_HANDLE));
     }
 
     bool signalGPUFenceAt(uint32_t index) override
@@ -717,14 +783,19 @@ public:
     {
         SwapChainVk* sc = (SwapChainVk*)chain;
         auto swapChain = (VkSwapchainKHR)sc->native;
-        const VkPresentInfoKHR info = 
+        const uint32_t SwapchainCount = 1;
+
+        // No present-id is chained here: SL does not use VK_KHR_present_wait, and LL2 frame
+        // attribution is handled separately on vkQueueSubmit (see CommandListContextVK::setLatencyFrameId).
+        // The app's own pNext chain in params is passed through unchanged.
+        const VkPresentInfoKHR info =
         {
             VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             params,
             // Cannot wait here on present semaphore (however acquires next image has to wait before doing a copy to back buffer)
             1,
-            &m_presentSemaphore, 
-            1,
+            &m_presentSemaphore,
+            SwapchainCount,
             &swapChain,
             &m_bufferToPresent, nullptr
         };
@@ -800,13 +871,6 @@ public:
     }
 
     void getFrameStats(SwapChain chain, void* frameStats)
-    {
-        assert(false);
-        SL_LOG_ERROR("Not implemented");
-        return;
-    }
-
-    void getLastPresentID(SwapChain chain, uint32_t& id)
     {
         assert(false);
         SL_LOG_ERROR("Not implemented");
@@ -1057,12 +1121,6 @@ ComputeStatus Vulkan::init(Device device, param::IParameters* params)
     m_instance = (VkInstance)deviceArray[0];
     m_device = (VkDevice)deviceArray[1];
     m_physicalDevice = (VkPhysicalDevice)deviceArray[2];
-
-    #ifdef SL_WITH_NVLLVK
-    m_reflex = CreateNvLowLatencyVk(m_device, params);
-    #else
-    #error "Not implemented"
-    #endif
     
     // For callbacks we just need VkDevice
     Generic::init(m_device, params);
@@ -1072,6 +1130,10 @@ ComputeStatus Vulkan::init(Device device, param::IParameters* params)
     {
         return ComputeStatus::eNoImplementation;
     }
+
+    // OTA-safe synchronization2 signal: get() leaves m_sync2SubmitEnabled false if an older interposer
+    // never published the param, so SL keeps the v1 vkQueueSubmit path. See kVulkanSynchronization2Enabled.
+    m_parameters->get(sl::param::global::kVulkanSynchronization2Enabled, &m_sync2SubmitEnabled);
 
     m_vk = new interposer::VkTable;
     m_vk->getInstanceProcAddr = vk->getInstanceProcAddr;
@@ -1114,10 +1176,13 @@ ComputeStatus Vulkan::init(Device device, param::IParameters* params)
         SL_LOG_WARN("VK_EXT_debug_utils extension not enabled - VK debug names and profiling markers disabled!");
     }
 
-    if (m_reflex)
+    m_reflex = CreateVkNvLowLatency2(m_device, params, m_vk);
+    #ifdef SL_WITH_NVLLVK
+    if (!m_reflex)
     {
-        m_reflex->initDispatchTable(m_ddt);
+        m_reflex = CreateNvLowLatencyVk(m_device, params, m_vk);
     }
+    #endif
 
     if(m_idt.CreateDebugUtilsMessengerEXT)
     {
@@ -1250,34 +1315,35 @@ ComputeStatus Vulkan::init(Device device, param::IParameters* params)
     return ComputeStatus::eOk;
 }
 
-// Non-virtual: not all backends can initialize all NSight SDK activity types,
-// and the base class cannot provide a meaningful default implementation.
-void Vulkan::initNsightActivity()
+bool Vulkan::initNsightActivityImpl(NGFX_ActivityType activity)
 {
-    NGFX_SetLibraryLoadFn(nsightSecureLoadLibraryCallback);
+    NGFX_Result result{ NGFX_Result_Success };
+    switch (activity)
+    {
+        case NGFX_ActivityType_GraphicsCapture:
+        {
+            NGFX_GraphicsCapture_InitializeActivity_Vulkan_Params p{ NGFX_GraphicsCapture_InitializeActivity_Vulkan_Params_VER };
+            result = NGFX_GraphicsCapture_InitializeActivity_Vulkan(&p);
+            break;
+        }
+        case NGFX_ActivityType_GPUTrace:
+        {
+            NGFX_GPUTrace_InitializeActivity_Vulkan_Params p{ NGFX_GPUTrace_InitializeActivity_Vulkan_Params_VER };
+            result = NGFX_GPUTrace_InitializeActivity_Vulkan(&p);
+            break;
+        }
+        case NGFX_ActivityType_SystemProfiling:
+        {
+            NGFX_SystemProfiling_InitializeActivity_Vulkan_Params p{ NGFX_SystemProfiling_InitializeActivity_Vulkan_Params_VER };
+            result = NGFX_SystemProfiling_InitializeActivity_Vulkan(&p);
+            break;
+        }
+        default:
+            SL_LOG_VERBOSE("Unsupported NSight SDK activity (%d)!", activity);
+            return false;
+    }
 
-    NGFX_GraphicsCapture_InitializeActivity_Vulkan_Params gfxParams{ NGFX_GraphicsCapture_InitializeActivity_Vulkan_Params_VER };
-    NGFX_Result gfxResult{ NGFX_GraphicsCapture_InitializeActivity_Vulkan(&gfxParams) };
-    if (gfxResult == NGFX_Result_Success)
-    {
-        m_nsightInitialized = true;
-        SL_LOG_INFO("NSight Graphics attached, capture activity initialized");
-    }
-    else
-    {
-        SL_LOG_VERBOSE("NSight Graphics not attached, capture activity initialization failed (%d)", gfxResult);
-        NGFX_SystemProfiling_InitializeActivity_Vulkan_Params sysParams{ NGFX_SystemProfiling_InitializeActivity_Vulkan_Params_VER };
-        NGFX_Result sysResult{ NGFX_SystemProfiling_InitializeActivity_Vulkan(&sysParams) };
-        if (sysResult == NGFX_Result_Success)
-        {
-            m_nsightInitialized = true;
-            SL_LOG_INFO("NSight Systems attached, profiling activity initialized");
-        }
-        else
-        {
-            SL_LOG_VERBOSE("NSight Systems not attached, profiling activity initialization failed (%d)", sysResult);
-        }
-    }
+    return result == NGFX_Result_Success;
 }
 
 ComputeStatus Vulkan::shutdown()
@@ -1573,7 +1639,7 @@ ComputeStatus Vulkan::createCommandListContext(ChiCommandQueue* queue,
                                                const char friendlyName[])
 { 
     auto tmp = new CommandListContextVK();
-    tmp->init(this, m_vk, friendlyName, m_device, (CommandQueueVk*)queue, count);
+    tmp->init(this, m_vk, friendlyName, m_device, (CommandQueueVk*)queue, count, m_sync2SubmitEnabled);
     tmp->m_nsightInitialized = m_nsightInitialized;
     ctx = tmp;
     return ComputeStatus::eOk;
@@ -3560,6 +3626,7 @@ ComputeStatus Vulkan::getSwapChainBuffer(SwapChain swapchain, uint32_t index, Re
 
     // This pointer is deleted when DestroyResource is called on the object.
     buffer = new sl::Resource{ ResourceType::eTex2d, swapchainImages[index], nullptr, imageView };
+    buffer->internalFlags = sl::Resource::eVulkanSwapChainImage;
     buffer->nativeFormat = sc->info.imageFormat;
     buffer->width = sc->info.imageExtent.width;
     buffer->height = sc->info.imageExtent.height;
@@ -3685,18 +3752,35 @@ ComputeStatus Vulkan::getNativeFormat(Format format, NativeFormat& native)
      CHECK_REFLEX();
      return m_reflex->notifyOutOfBandCommandQueue(queue, type);
  }
- ComputeStatus Vulkan::setAsyncFrameMarker(CommandQueue queue, PCLMarker marker, uint64_t frameId)
- {
-     CHECK_REFLEX();
-     SL_LOG_WARN_ONCE("Vulkan setAsyncFrameMarker is not implemented!");
-     return m_reflex->setAsyncFrameMarker(queue, marker, frameId);
- }
- ComputeStatus Vulkan::setLatencyMarker(CommandQueue queue, PCLMarker marker, uint64_t frameId)
- {
-     CHECK_REFLEX();
-     SL_LOG_WARN_ONCE("Vulkan setLatencyMarker is not implemented!");
-     return ComputeStatus::eOk;
- }
+
+ComputeStatus Vulkan::setAsyncFrameMarker(CommandQueue, PCLMarker marker, uint64_t frameId)
+{
+    // "Async" markers are for DirectX, Vk instead gets a presentId in the next chain to vkQueueSubmit.
+    // Track down "SetAsyncFrameMarker missing in VK_NV_low_latency2 extension" email thread for longer discussion.
+    // So, we use regular marker implementation here.
+    //
+    // VK_NV_low_latency2 has no async-marker channel: every marker lands on the same swapchain timeline
+    // via vkSetLatencyMarkerNV (and v1's NvLL_VK_SetLatencyMarker is likewise single-channel), unlike
+    // D3D where SL's async present markers go through a separate NvAPI channel. So if the app and SL
+    // both emit regular PRESENT_START/END they double-stamp the driver at the same frame id.
+    //
+    // Suppress SL's PRESENT markers only when the app emits its own (detected and latched via
+    // appOwnsPresentMarkers): that removes the duplication for self-emitting apps while preserving the
+    // behavior for apps that cannot emit present markers (e.g. Unity), where SL remains the sole source.
+    // The genuinely out-of-band markers (OOB present/render-submit, late-warp) are SL's alone and are
+    // always forwarded.
+    if ((marker == PCLMarker::ePresentStart || marker == PCLMarker::ePresentEnd) && appOwnsPresentMarkers())
+    {
+        return ComputeStatus::eOk;
+    }
+    return setReflexMarker(marker, frameId);
+}
+
+ComputeStatus Vulkan::setLatencyMarker(CommandQueue queue, PCLMarker marker, uint64_t frameId)
+{
+    // TODO: ask @esullivan and @chansen.  Seems NvAPI_D3D_SetLatencyMarker was added for LW?
+    return setReflexMarker(marker, frameId);
+}
 
  ComputeStatus Vulkan::fillSupportedDeviceExtensions()
  {
@@ -3764,5 +3848,25 @@ ComputeStatus Vulkan::getSwapChainPrivateData(void* nativeSwapChain, void** data
     *data = reinterpret_cast<void*>(raw);
     return ComputeStatus::eOk;
 }
+
+bool Vulkan::areLatencyIdsSupported() const
+{
+    // Only the LL2 backend consumes VkLatencySubmissionPresentIdNV; the NvAPI v1 backend does not.
+    // m_reflex is set once during init() and not swapped afterwards, so this is safe to read here.
+    return m_reflex && m_reflex->supportsLatencySubmissionPresentId();
+}
+
+ComputeStatus Vulkan::notifyCreateSwapchain(SwapChain chain, bool isLatencyModeEnabled)
+{
+    CHECK_REFLEX();
+    return m_reflex->notifyCreateSwapchain(chain, isLatencyModeEnabled);
+}
+
+ComputeStatus Vulkan::notifyDestroySwapchain(SwapChain chain)
+{
+    CHECK_REFLEX();
+    return m_reflex->notifyDestroySwapchain(chain);
+}
+
 }
 }

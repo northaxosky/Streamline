@@ -20,12 +20,10 @@
 * SOFTWARE.
 */
 
-#if defined(SL_WINDOWS)
 #include <d3d12.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
-#endif // defined(SL_WINDOWS)
 #define __STDC_FORMAT_MACROS 1
 #include <cinttypes>
 #include <utility>
@@ -44,6 +42,8 @@ struct IDXGISwapChain;
 #include "source/core/sl.param/parameters.h"
 #include "source/platforms/sl.chi/generic.h"
 #include "source/core/sl.security/secureLoadLibrary.h"
+#include "source/platforms/sl.chi/nvapiCompat.h"
+#include "external/nsight-sdk/SystemsGraphics/include/Impl/NGFX_Core.h"
 #include "nvapi.h"
 
 // {B5504F36-CB88-4B2D-AE64-9CAE29E23CA9}
@@ -89,6 +89,8 @@ namespace sl
 namespace chi
 {
 
+namespace
+{
 void* nsightSecureLoadLibraryCallback(const wchar_t* libName)
 {
     auto handle{ static_cast<void*>(sl::security::loadLibrary(libName)) };
@@ -97,6 +99,29 @@ void* nsightSecureLoadLibraryCallback(const wchar_t* libName)
         SL_LOG_VERBOSE("NSight library load failed: %S", libName);
     }
     return handle;
+}
+}
+
+void Generic::initNsightActivity()
+{
+    NGFX_SetLibraryLoadFn(nsightSecureLoadLibraryCallback);
+
+    NGFX_ActivityType activity{};
+    const NGFX_Result detected{ NGFX_GetInjectedActivity(&activity) };
+    if (detected != NGFX_Result_Success)
+    {
+        SL_LOG_VERBOSE("NSight SDK activity not detected (%d)!", detected);
+        return;
+    }
+
+    if (!initNsightActivityImpl(activity))
+    {
+        SL_LOG_WARN("NSight SDK activity initialization failed (%d)!", activity);
+        return;
+    }
+
+    m_nsightInitialized = true;
+    SL_LOG_INFO("NSight SDK activity initialized successfully!");
 }
 
 ScopedProfilingSection::ScopedProfilingSection(ICompute* compute, CommandList cmdList, const char* function, sl::Feature feature)
@@ -168,8 +193,13 @@ struct ResourcePool : IResourcePool
         // collectGarbage() will reclaim unused pool entries to keep VRAM in check.
         m_compute->beginVRAMSegment(m_vramSegment.c_str());
         Resource res{};
-        m_compute->cloneResource(source, res, debugName, initialState);
+        auto status = m_compute->cloneResource(source, res, debugName, initialState);
         m_compute->endVRAMSegment();
+        if (status != ComputeStatus::eOk || !res)
+        {
+            SL_LOG_ERROR("Failed to clone resource '%s' for hash %llu", debugName, hash);
+            return HashedResource{};
+        }
         m_compute->getResourceState(res->state, initialState);
         resource = HashedResource(hash, initialState, res, m_compute, true);
 #if SL_DEBUG_RESOURCE_POOL
@@ -296,6 +326,7 @@ ComputeStatus Generic::init(Device device, param::IParameters* params)
     m_parameters = params;
     m_typelessDevice = device;
     params->get(sl::param::global::kPreferenceFlags, (uint64_t*)&m_preferenceFlags);
+    m_cachedReflexSyncParams.version = NV_SET_REFLEX_SYNC_PARAMS_VER1;
     return ComputeStatus::eOk;
 }
 
@@ -834,11 +865,10 @@ ComputeStatus Generic::destroyResource(Resource resource, uint32_t frameDelay)
         manageVRAM(resource, VRAMOperation::eFree);
     }
 
-    if (m_releaseCallback && bufferOrTex2d)
+    // Skip the host release callback for Vulkan swapchain images: they were never allocated by the
+    // host callback, and they need destroyResourceDeferredImpl to clean up the internally-created VkImageView.
+    if (m_releaseCallback && bufferOrTex2d && !(resource->internalFlags & sl::Resource::eVulkanSwapChainImage))
     {
-        //NOTE: We never destroy resources created by the host, only internal ones.
-
-        // This allows host to destroy VK memory etc.
         m_releaseCallback(resource, m_typelessDevice);
         delete resource;
     }
@@ -1244,6 +1274,17 @@ ComputeStatus Generic::getSleepStatus(ReflexState& settings)
     return ComputeStatus::eOk;
 }
 
+ComputeStatus Generic::getFrameGenParams(uint8_t& outFgMultiplier, bool& outDfgControl)
+{
+    NV_GET_SLEEP_STATUS_PARAMS_V1_BFM_37870595 params{};
+    compile_time_assert(sizeof(NV_GET_SLEEP_STATUS_PARAMS_V1_BFM_37870595) == sizeof(NV_GET_SLEEP_STATUS_PARAMS_V1));
+    params.version = NV_GET_SLEEP_STATUS_PARAMS_VER;
+    NVAPI_CHECK(NvAPI_D3D_GetSleepStatus((IUnknown*)m_typelessDevice, (NV_GET_SLEEP_STATUS_PARAMS*)&params));
+    outFgMultiplier = params.fgMultiplier;
+    outDfgControl = params.bDfgControl != 0;
+    return ComputeStatus::eOk;
+}
+
 //TODO: Remove this binary compatible struct once we update the NVAPI headers.
 typedef struct
 {
@@ -1321,6 +1362,36 @@ ComputeStatus Generic::setReflexMarker(PCLMarker marker, uint64_t frameId)
     params.frameID = frameId;
     params.markerType = (NV_LATENCY_MARKER_TYPE)marker;
     NVAPI_CHECK(NvAPI_D3D_SetLatencyMarker((IUnknown*)m_typelessDevice, &params));
+    return ComputeStatus::eOk;
+}
+
+ComputeStatus Generic::setReflexSync(bool enable, int32_t timeInQueueUs, uint32_t timeInQueueUsTarget, uint32_t vblankIntervalUs)
+{
+    std::unique_lock lock(m_mutexReflexSync);
+
+    m_cachedReflexSyncParams.bEnable = enable ? 1 : 0;
+    m_cachedReflexSyncParams.bDisable = enable ? 0 : 1;
+    m_cachedReflexSyncParams.timeInQueueUs = timeInQueueUs;
+    m_cachedReflexSyncParams.timeInQueueUsTarget = timeInQueueUsTarget;
+    m_cachedReflexSyncParams.vblankIntervalUs = vblankIntervalUs;
+
+    NVAPI_CHECK(NvAPI_D3D_SetReflexSync((IUnknown*)m_typelessDevice, (NV_SET_REFLEX_SYNC_PARAMS*)&m_cachedReflexSyncParams));
+
+    m_cachedReflexSyncParams.bEnable = 0;
+    m_cachedReflexSyncParams.bDisable = 0;
+
+    return ComputeStatus::eOk;
+}
+
+ComputeStatus Generic::setReflexSyncFG(uint8_t dfgMaxMultiplier, uint32_t dfgTargetFps, uint8_t fgMultiplier)
+{
+    std::unique_lock lock(m_mutexReflexSync);
+
+    m_cachedReflexSyncParams.fgMultiplier = fgMultiplier;
+    m_cachedReflexSyncParams.dfgMaxMultiplier = dfgMaxMultiplier;
+    m_cachedReflexSyncParams.dfgTargetFps = dfgTargetFps;
+
+    NVAPI_CHECK(NvAPI_D3D_SetReflexSync((IUnknown*)m_typelessDevice, (NV_SET_REFLEX_SYNC_PARAMS*)&m_cachedReflexSyncParams));
     return ComputeStatus::eOk;
 }
 

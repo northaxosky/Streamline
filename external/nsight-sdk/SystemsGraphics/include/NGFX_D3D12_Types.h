@@ -111,5 +111,4 @@ typedef NGFX_DLSS_FG_PresentBoundary_D3D12_Params_V1 NGFX_DLSS_FG_PresentBoundar
 #define NGFX_DLSS_FG_PresentBoundary_D3D12_Params_V1_VER NGFX_MAKE_STRUCT_VERSION(NGFX_DLSS_FG_PresentBoundary_D3D12_Params_V1, 1)
 #define NGFX_DLSS_FG_PresentBoundary_D3D12_Params_VER NGFX_DLSS_FG_PresentBoundary_D3D12_Params_V1_VER
 
-
 #endif // NGFX_D3D12_TYPES_H

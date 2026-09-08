@@ -28,7 +28,10 @@
 #include <atomic>
 #include <mutex>
 
+#include "external/nsight-sdk/SystemsGraphics/include/NGFX_Types.h"
+
 #include "source/platforms/sl.chi/compute.h"
+#include "source/platforms/sl.chi/nvapiCompat.h"
 
 typedef LUID    NVSDK_NGX_LUID;
 
@@ -95,8 +98,6 @@ enum class VRAMOperation
     eCount
 };
 
-void* nsightSecureLoadLibraryCallback(const wchar_t* libName);
-
 class Generic : public ICompute
 {
 protected:
@@ -152,6 +153,12 @@ protected:
 
     std::map<void*, TranslatedResource> m_sharedResourceMap{};
 
+    std::mutex m_mutexReflexSync;
+    // setReflexSync and setReflexSyncFG each set a different subset of fields
+    // in NV_SET_REFLEX_SYNC_PARAMS but both submit the full struct to NvAPI.
+    // Caching ensures one call doesn't zero out the other's fields.
+    NV_SET_REFLEX_SYNC_PARAMS_V1_BFM_37843738 m_cachedReflexSyncParams{};
+
     virtual int destroyResourceDeferredImpl(const Resource InResource) = 0;
     virtual ComputeStatus createBufferResourceImpl(ResourceDescription &InOutResourceDesc, Resource &OutResource, ResourceState InitialState, const char InFriendlyName[]) = 0;
     virtual ComputeStatus createTexture2DResourceSharedImpl(ResourceDescription &InOutResourceDesc, Resource &OutResource, bool UseNativeFormat, ResourceState InitialState, const char InFriendlyName[]) = 0;
@@ -174,6 +181,16 @@ protected:
     bool isResourceTracked(chi::Resource resource);
 
     VRAMSegment manageVRAM(Resource res, VRAMOperation op);
+
+    //! Fixed detect/init/log sequence; backends override initNsightActivityImpl() for the API-specific calls.
+    void initNsightActivity();
+    //! Backend hook: initialize `activity` for this graphics API.
+    //! Returns true on success; sets `recognized` to whether this backend handles `activity`.
+    //! Base recognizes nothing.
+    virtual bool initNsightActivityImpl(NGFX_ActivityType activity)
+    {
+        return false;
+    }
 
 #if SL_ENABLE_PROFILING
     ComputeStatus beginProfilingImpl(CommandList cmdList, const char* marker, uint8_t r, uint8_t g, uint8_t b) override { return ComputeStatus::eNoImplementation; }
@@ -304,10 +321,13 @@ public:
 
     virtual ComputeStatus setSleepMode(const ReflexOptions& consts) override;
     virtual ComputeStatus getSleepStatus(ReflexState& settings) override;
+    virtual ComputeStatus getFrameGenParams(uint8_t& outFgMultiplier, bool& outDfgControl) override;
     virtual ComputeStatus getLatencyReport(ReflexState& settings) override;
     virtual ComputeStatus sleep() override;
     virtual ComputeStatus setReflexMarker(PCLMarker marker, uint64_t frameId) override;
-    
+    virtual ComputeStatus setReflexSync(bool enable, int32_t timeInQueueUs, uint32_t timeInQueueUsTarget, uint32_t vblankIntervalUs) override;
+    virtual ComputeStatus setReflexSyncFG(uint8_t dfgMaxMultiplier, uint32_t dfgTargetFps, uint8_t fgMultiplier) override;
+
 
     // Sharing API
     virtual ComputeStatus fetchTranslatedResourceFromCache(ICompute* otherAPI, ResourceType type, Resource res, TranslatedResource& shared, const char friendlyName[]) override;

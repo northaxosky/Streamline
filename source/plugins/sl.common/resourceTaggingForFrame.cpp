@@ -150,6 +150,7 @@ sl::Result common::ResourceTaggingForFrame::setTag(const sl::Resource* resource,
         bool writeTag = tag == kBufferTypeScalingOutputColor || tag == kBufferTypeAmbientOcclusionDenoised ||
                         tag == kBufferTypeShadowDenoised || tag == kBufferTypeSpecularHitDenoised ||
                         tag == kBufferTypeDiffuseHitDenoised || tag == kBufferTypeBackbuffer;
+        writeTag = writeTag || tag == kBufferTypeUpliftOutputColor;
         if (!writeTag && lifecycle != ResourceLifecycle::eValidUntilPresent)
         {
             //! Only make a copy if this tag is required by at least one loaded and supported plugin on the same
@@ -184,6 +185,12 @@ sl::Result common::ResourceTaggingForFrame::setTag(const sl::Resource* resource,
                 frameTag.clone =
                     m_pPool->allocate(actualResource,
                                        (SL_RESOURCE_NAME("clone.tagVolatile.") + sl::getBufferTypeAsStr(tag) + "." + std::to_string(id)).c_str());
+
+                if (!frameTag.clone)
+                {
+                    // ResourcePool::allocate already logs the clone failure (with resource name + hash).
+                    return Result::eErrorComputeFailed;
+                }
 
                 // Get tagged resource's state
                 chi::ResourceState state{};

@@ -25,10 +25,8 @@
 #include <string>
 #include <vector>
 #include <atomic>
-#ifdef SL_WINDOWS
 #include <windows.h>
 #include <unknwn.h>
-#endif
 
 #include "include/sl_struct.h"
 #include "include/sl_core_types.h"
@@ -172,5 +170,9 @@ using PFunVkDestroySwapchainKHRBefore = void(VkDevice Device, VkSwapchainKHR Swa
 using PFunVkCreateWin32SurfaceKHRBefore = VkResult(VkInstance Instance, const VkWin32SurfaceCreateInfoKHR* CreateInfo, const VkAllocationCallbacks* Allocator, VkSurfaceKHR* Surface, bool& Skip);
 using PFunVkCreateWin32SurfaceKHRAfter = VkResult(VkInstance Instance, const VkWin32SurfaceCreateInfoKHR* CreateInfo, const VkAllocationCallbacks* Allocator, VkSurfaceKHR* Surface);
 using PFunVkDestroySurfaceKHRBefore = void(VkInstance Instance, VkSurfaceKHR Surface, const VkAllocationCallbacks* Allocator, bool& Skip);
+
+//! Function to look up the HWND associated with a VkSurfaceKHR.
+//! Exposed through the parameter system (kPFunGetSurfaceWindow) so plugins can call it without linking to the plugin manager.
+using PFunGetSurfaceWindow = HWND(VkSurfaceKHR surface);
 
 } // namespace sl
