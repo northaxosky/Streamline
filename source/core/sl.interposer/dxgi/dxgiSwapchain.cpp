@@ -27,6 +27,7 @@
 #include "include/sl_helpers.h"
 #include "include/sl_hooks.h"
 #include "source/core/sl.interposer/dxgi/dxgiSwapchain.h"
+#include "source/core/sl.interposer/dxgi/dxgiPresent.h"
 #include "source/core/sl.interposer/d3d12/d3d12Device.h"
 #include "source/core/sl.interposer/d3d12/d3d12CommandQueue.h"
 #include "source/core/sl.api/internal.h"
@@ -255,42 +256,51 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::Present(UINT SyncInterval, UINT Flags)
     auto present = [this](UINT SyncInterval, UINT Flags)->HRESULT
     {
         auto hooksId = FunctionHookID::eIDXGISwapChain_Present;
-        const auto& hooks = sl::plugin_manager::getInterface()->getBeforeHooks(hooksId);
-        bool skip = false;
-        HRESULT hr = S_OK;
-        for (auto [hook, feature] : hooks)
-        {
-            hr = ((PFunPresentBefore*)hook)(m_base, SyncInterval, Flags, skip);
-            if (FAILED(hr))
+        return invokePresent(
+            [&](bool& skip)
             {
-                SL_LOG_WARN("IDXGISwapChain::Present before hook for feature '%s' failed "
-                            "(HRESULT 0x%08X: %s, host frame %u).",
-                            sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
-                            std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
-                return hr;
-            }
-        }
-
-        if (!skip) hr = m_base->Present(SyncInterval, Flags);
-
-        if (g_swapChainTracker.notifyAfterPresent(this, skip))
-        {
-            const auto& hooksAfter = sl::plugin_manager::getInterface()->getAfterHooks(hooksId);
-            for (auto [hook, feature] : hooksAfter)
-            {
-                hr = ((PFunPresentAfter*)hook)(Flags);
-                if (FAILED(hr))
+                HRESULT hr = S_OK;
+                const auto& hooks = sl::plugin_manager::getInterface()->getBeforeHooks(hooksId);
+                for (auto [hook, feature] : hooks)
                 {
-                    SL_LOG_WARN("IDXGISwapChain::Present after hook for feature '%s' failed "
-                                "(HRESULT 0x%08X: %s, host frame %u).",
-                                sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
-                                std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
-                    return hr;
+                    hr = ((PFunPresentBefore*)hook)(m_base, SyncInterval, Flags, skip);
+                    if (FAILED(hr))
+                    {
+                        SL_LOG_WARN("IDXGISwapChain::Present before hook for feature '%s' failed "
+                                    "(HRESULT 0x%08X: %s, host frame %u).",
+                                    sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
+                                    std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
+                        return hr;
+                    }
                 }
-            }
-        }
-
-        return hr;
+                return hr;
+            },
+            [&]()
+            {
+                return m_base->Present(SyncInterval, Flags);
+            },
+            [&](bool skip)
+            {
+                return g_swapChainTracker.notifyAfterPresent(this, skip);
+            },
+            [&]()
+            {
+                HRESULT hr = S_OK;
+                const auto& hooksAfter = sl::plugin_manager::getInterface()->getAfterHooks(hooksId);
+                for (auto [hook, feature] : hooksAfter)
+                {
+                    hr = ((PFunPresentAfter*)hook)(Flags);
+                    if (FAILED(hr))
+                    {
+                        SL_LOG_WARN("IDXGISwapChain::Present after hook for feature '%s' failed "
+                                    "(HRESULT 0x%08X: %s, host frame %u).",
+                                    sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
+                                    std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
+                        return hr;
+                    }
+                }
+                return hr;
+            });
     };
     SL_EXCEPTION_HANDLE_START
     return present(SyncInterval, Flags);
@@ -498,45 +508,51 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::Present1(UINT SyncInterval, UINT Presen
     auto present = [this](UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters)->HRESULT
     {
         auto hooksId = FunctionHookID::eIDXGISwapChain_Present1;
-        const auto& hooks = sl::plugin_manager::getInterface()->getBeforeHooks(hooksId);
-        bool skip = false;
-        HRESULT hr = S_OK;
-        for (auto [hook, feature] : hooks)
-        {
-            hr = ((PFunPresent1Before*)hook)(m_base, SyncInterval, PresentFlags, pPresentParameters, skip);
-            if (FAILED(hr))
+        return invokePresent(
+            [&](bool& skip)
             {
-                SL_LOG_WARN("IDXGISwapChain::Present1 before hook for feature '%s' failed "
-                            "(HRESULT 0x%08X: %s, host frame %u).",
-                            sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
-                            std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
-                return hr;
-            }
-        }
-
-        if (!skip)
-        {
-            hr = static_cast<IDXGISwapChain1*>(m_base)->Present1(SyncInterval, PresentFlags, pPresentParameters);
-        }
-
-        if (g_swapChainTracker.notifyAfterPresent(this, skip))
-        {
-            const auto& hooksAfter = sl::plugin_manager::getInterface()->getAfterHooks(hooksId);
-            for (auto [hook, feature] : hooksAfter)
-            {
-                hr = ((PFunPresentAfter*)hook)(PresentFlags);
-                if (FAILED(hr))
+                HRESULT hr = S_OK;
+                const auto& hooks = sl::plugin_manager::getInterface()->getBeforeHooks(hooksId);
+                for (auto [hook, feature] : hooks)
                 {
-                    SL_LOG_WARN("IDXGISwapChain::Present1 after hook for feature '%s' failed "
-                                "(HRESULT 0x%08X: %s, host frame %u).",
-                                sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
-                                std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
-                    return hr;
+                    hr = ((PFunPresent1Before*)hook)(m_base, SyncInterval, PresentFlags, pPresentParameters, skip);
+                    if (FAILED(hr))
+                    {
+                        SL_LOG_WARN("IDXGISwapChain::Present1 before hook for feature '%s' failed "
+                                    "(HRESULT 0x%08X: %s, host frame %u).",
+                                    sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
+                                    std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
+                        return hr;
+                    }
                 }
-            }
-        }
-
-        return hr;
+                return hr;
+            },
+            [&]()
+            {
+                return static_cast<IDXGISwapChain1*>(m_base)->Present1(SyncInterval, PresentFlags, pPresentParameters);
+            },
+            [&](bool skip)
+            {
+                return g_swapChainTracker.notifyAfterPresent(this, skip);
+            },
+            [&]()
+            {
+                HRESULT hr = S_OK;
+                const auto& hooksAfter = sl::plugin_manager::getInterface()->getAfterHooks(hooksId);
+                for (auto [hook, feature] : hooksAfter)
+                {
+                    hr = ((PFunPresentAfter*)hook)(PresentFlags);
+                    if (FAILED(hr))
+                    {
+                        SL_LOG_WARN("IDXGISwapChain::Present1 after hook for feature '%s' failed "
+                                    "(HRESULT 0x%08X: %s, host frame %u).",
+                                    sl::getFeatureAsStr(feature), static_cast<uint32_t>(hr),
+                                    std::system_category().message(hr).c_str(), hostFrameForDiagnostics());
+                        return hr;
+                    }
+                }
+                return hr;
+            });
     };
     SL_EXCEPTION_HANDLE_START
     return present(SyncInterval, PresentFlags, pPresentParameters);
