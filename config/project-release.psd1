@@ -1,22 +1,22 @@
 @{
-    ReleaseId = 'cs-streamline-2.12.0-1'
-    ReleaseTag = 'cs-streamline-v2.12.0-1'
+    ReleaseId = 'cs-streamline-2.14.1-1'
+    ReleaseTag = 'cs-streamline-v2.14.1-1'
     KeyId = 1
     PublicKeyXY = '78be6901836d3a547e359a3407387a19bce9efa1ff54486e62bc330d64fcf95d45d50e8f81e993abfdd7de2bdf4574ada03f4883ee7f327a741ba1b9f1e0cfc6'
     Upstream = @{
-        Version = 'v2.12.0'
-        Url = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.12.0/streamline-sdk-v2.12.0.zip'
-        Sha256 = 'f5c0a3d870707dddc3570fb4bcd3655cf48a8a68c3a9d342910cfa21b77dcf48'
+        Version = 'v2.14.1'
+        Url = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.1/streamline-sdk-v2.14.1.zip'
+        Sha256 = '92c4d954631a1710da86ca3fa8d5034f2b9503838c95fc4ae977ae149319781b'
     }
     Runtime = @(
-        @{ Name = 'nvngx_dlss.dll'; ArchivePath = 'bin/x64/nvngx_dlss.dll'; Role = 'NvidiaModule'; Sha256 = 'be6e434a94ca32499515eb62ca0e6c274526055d568d0426e4c652dcdfb6ee6e' }
-        @{ Name = 'nvngx_dlssg.dll'; ArchivePath = 'bin/x64/nvngx_dlssg.dll'; Role = 'NvidiaModule'; Sha256 = '135eaf0733c1e37381a8c28abcf7a862404a54132b81787c04e35d09efc5e36f' }
+        @{ Name = 'nvngx_dlss.dll'; ArchivePath = 'bin/x64/nvngx_dlss.dll'; Role = 'NvidiaModule'; Sha256 = '3975567b8943c53acce397f2b72380092f84f162d00b0d2c7d08a1025c563983' }
+        @{ Name = 'nvngx_dlssg.dll'; ArchivePath = 'bin/x64/nvngx_dlssg.dll'; Role = 'NvidiaModule'; Sha256 = 'ff6e90eb78b827927dff5b4ecc6b1c870c2e9bca29ed9f48c7d348cc9e170b82' }
         @{ Name = 'sl.common.dll'; BuildProject = 'sl.common'; Role = 'ProjectCommon' }
-        @{ Name = 'sl.dlss.dll'; ArchivePath = 'bin/x64/sl.dlss.dll'; Role = 'NvidiaModule'; Sha256 = 'a997022d2b93601e0eefc3ddb3067c36df386dd3163ae71e11095191fb14f8e4' }
-        @{ Name = 'sl.dlss_g.dll'; ArchivePath = 'bin/x64/sl.dlss_g.dll'; Role = 'NvidiaModule'; Sha256 = '1fec3f8fdfc59d78c4445c276c1a0fb798bf251985f348597dc2b44d0c995e52' }
+        @{ Name = 'sl.dlss.dll'; ArchivePath = 'bin/x64/sl.dlss.dll'; Role = 'NvidiaModule'; Sha256 = '73bf52c0cfaa5900a8f3f4a91306e4625e7cca696dfb305aae44c9f97b582e1f' }
+        @{ Name = 'sl.dlss_g.dll'; ArchivePath = 'bin/x64/sl.dlss_g.dll'; Role = 'NvidiaModule'; Sha256 = 'f4a6b2b14dcc0b1485989e430d3b4e3a44ac1800b92ba1ad74f476e64fb2b09c' }
         @{ Name = 'sl.interposer.dll'; BuildProject = 'sl.interposer'; Role = 'ProjectInterposer' }
-        @{ Name = 'sl.pcl.dll'; ArchivePath = 'bin/x64/sl.pcl.dll'; Role = 'NvidiaModule'; Sha256 = '699ab461e64e95189a7fe6a21c79ad237cf56b60ea748cb6c840cd5431ba91d1' }
-        @{ Name = 'sl.reflex.dll'; ArchivePath = 'bin/x64/sl.reflex.dll'; Role = 'NvidiaModule'; Sha256 = '7e6e4ccc4b561bd449fb0da90709d9b96b08c3f6f4697362caaa359e72a58a67' }
+        @{ Name = 'sl.pcl.dll'; ArchivePath = 'bin/x64/sl.pcl.dll'; Role = 'NvidiaModule'; Sha256 = 'f13d51cfa05f4cd514df2026049e2db8adf359221713170ad386fd499915b582' }
+        @{ Name = 'sl.reflex.dll'; ArchivePath = 'bin/x64/sl.reflex.dll'; Role = 'NvidiaModule'; Sha256 = '0ce9725e3e03ea9e7f81d008b57f33ee365973d2e349131c8b1c3e3378fe2db0' }
     )
     Licenses = @(
         @{ ArchivePath = 'license.txt'; OutputPath = 'license.txt' }
