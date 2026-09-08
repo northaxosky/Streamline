@@ -14,12 +14,18 @@ $tamperedHashRoot = Join-Path $artifacts "tampered-hash"
 $keyRoot = Join-Path $artifacts "keys"
 $qualificationRoot = Join-Path $root "_artifacts\runtime-qualification\develop-sdk"
 $signingTool = Join-Path $root "tools\project-signing.ps1"
+$physicalPathSource = Join-Path $root "source\core\sl.security\physicalFilePath.cpp"
 $releaseId = "streamline-test-release-1"
 $keyId = [uint32]117
 
 $compiler = Get-Command cl.exe -ErrorAction SilentlyContinue
 if (-not $compiler) {
     throw "cl.exe is unavailable. Run this script from a Visual Studio developer shell."
+}
+$physicalPathText = Get-Content -Raw $physicalPathSource
+if (-not $physicalPathText.Contains("GetMappedFileNameW") -or
+    $physicalPathText.Contains("GetFinalPathNameByHandleW")) {
+    throw "Physical path binding must use mapped-file identity, not a rewritable final-path query."
 }
 $haveNvidiaFixture =
     (Test-Path (Join-Path $qualificationRoot "sl.interposer.dll") -PathType Leaf) -and
@@ -280,6 +286,7 @@ $testExe = Join-Path $artifacts "project-trust-regression.exe"
     /DSL_PRODUCTION /DSL_PROJECT_TRUST_TEST_CONFIG `
     "/I$root" "/I$trustInclude" `
     (Join-Path $PSScriptRoot "project-trust-regression.cpp") `
+    $physicalPathSource `
     (Join-Path $root "source\core\sl.security\projectTrust.cpp") `
     (Join-Path $root "source\core\sl.security\secureLoadLibrary.cpp") `
     "/Fo:$artifacts\\" "/Fe:$testExe"

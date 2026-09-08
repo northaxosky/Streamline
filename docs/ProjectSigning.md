@@ -40,7 +40,14 @@ full paths in the requested DLL's directory. Every target is opened with read sh
 and kept open through `LoadLibraryExW`. The same held-handle rule applies to the
 manifest-free NVIDIA-only fallback. Windows has no load-from-handle API;
 retaining restrictive handles closes the writable/delete replacement window
-while the loader reopens the verified full physical path. The initial bounded
+while the loader reopens the verified physical backing file. Its native backing
+identity is derived from a read-only mapping of the same retained handle with
+`GetMappedFileNameW`, avoiding final-path queries that virtual-file systems can
+rewrite back to a logical alias. Local authentication uses the mount manager's
+volume-GUID path; loading uses a mount-manager path that is independently
+reopened, file-ID matched, and retained through `LoadLibraryExW`. UNC paths are
+likewise reopened and identity matched. Per-session DOS aliases are never used
+to select the load path, and unsupported device identities fail closed. The initial bounded
 implementation revalidates the selected package for each plugin load rather
 than retaining a process-lifetime cache; this keeps resolver and file-identity
 semantics simple at the cost of additional startup-only I/O.
