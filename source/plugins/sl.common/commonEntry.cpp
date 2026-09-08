@@ -50,14 +50,11 @@
 #include "_artifacts/gitVersion.h"
 #include "_artifacts/json/common_json.h"
 
-#ifdef SL_WINDOWS
-#define NV_WINDOWS
 // NT_SUCCESS macro
 #include <winternl.h>
 // Needed for SHGetKnownFolderPath
 #include <ShlObj.h>
 #pragma comment(lib,"shlwapi.lib")
-#endif
 
 #include "external/ngx-sdk/include/nvsdk_ngx.h"
 #include "external/ngx-sdk/include/nvsdk_ngx_helpers.h"
@@ -152,6 +149,7 @@ struct CommonEntryContext
 
 
 };
+
 }
 
 //! Embedded JSON, containing information about the plugin and the hooks it requires.
@@ -236,6 +234,7 @@ sl::Result common::ResourceTaggingGeneral::setTag(const sl::Resource* resource,
         bool writeTag = tag == kBufferTypeScalingOutputColor || tag == kBufferTypeAmbientOcclusionDenoised ||
             tag == kBufferTypeShadowDenoised || tag == kBufferTypeSpecularHitDenoised || tag == kBufferTypeDiffuseHitDenoised ||
             tag == kBufferTypeBackbuffer;
+        writeTag = writeTag || tag == kBufferTypeUpliftOutputColor;
         if (!writeTag && lifecycle != ResourceLifecycle::eValidUntilPresent)
         {
             //! Only make a copy if this tag is required by at least one loaded and supported plugin on the same viewport and with immutable life-cycle.
@@ -276,6 +275,12 @@ sl::Result common::ResourceTaggingGeneral::setTag(const sl::Resource* resource,
 
                 // Defaults to eCopyDestination state 
                 cr.clone = ctx.pool->allocate(actualResource, (SL_RESOURCE_NAME("clone.tagVolatile.") + sl::getBufferTypeAsStr(tag) + "." + std::to_string(id)).c_str());
+
+                if (!cr.clone)
+                {
+                    // ResourcePool::allocate already logs the clone failure (with resource name + hash).
+                    return Result::eErrorComputeFailed;
+                }
 
                 // Get tagged resource's state
                 chi::ResourceState state{};
@@ -908,7 +913,7 @@ bool getNGXFeatureRequirements(NVSDK_NGX_Feature feature, common::PluginInfo& pl
             NVSDK_NGX_FeatureDiscoveryInfo info{};
             info.FeatureID = feature;
             info.SDKVersion = NVSDK_NGX_Version_API;
-            info.ApplicationDataPath = file::getTmpPath();
+            info.ApplicationDataPath = pluginPath;
             info.Identifier = applicationId;
             info.FeatureInfo = &featureInfo;
             NVSDK_NGX_Result ngxResult{};
@@ -1438,18 +1443,17 @@ bool slOnPluginStartup(const char* jsonConfig, void* device)
         // Reset our flag until we see if NGX can be initialized correctly
         ctx.needNGX = false;
 
-        // We also need to provide path for logging
-        PWSTR documentsDataPath = (PWSTR)file::getTmpPath();
-        if (!documentsDataPath)
+        // Directory for NGX logs and other temporary files
+        wchar_t* slPluginPathUtf16 = {};
+        param::getPointerParam(parameters, param::global::kPluginPath, &slPluginPathUtf16);
+        if (!slPluginPathUtf16 || !*slPluginPathUtf16)
         {
-            SL_LOG_ERROR( "Failed to obtain path to documents");
+            SL_LOG_ERROR("Failed to obtain path for NGX application data");
         }
 
         // We need to provide path to the NGX modules
-        wchar_t* slPluginPathUtf16 = {};
-        param::getPointerParam(parameters, param::global::kPluginPath, &slPluginPathUtf16);
         // Always check first where our plugins are then the other paths
-        std::vector<std::wstring> ngxPathsTmp = {slPluginPathUtf16 };
+        std::vector<std::wstring> ngxPathsTmp = { slPluginPathUtf16 };
         std::vector<wchar_t*> ngxPaths = { slPluginPathUtf16 };
         auto& paths = config.at("paths");
         for (auto& p : paths)
@@ -1493,27 +1497,27 @@ bool slOnPluginStartup(const char* jsonConfig, void* device)
             // Engine data provided, no need for the application id
             if (deviceType == RenderAPI::eD3D11)
             {
-                ngxStatus = NVSDK_NGX_D3D11_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), documentsDataPath, (ID3D11Device*)device, &info, NVSDK_NGX_Version_API);
+                ngxStatus = NVSDK_NGX_D3D11_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), slPluginPathUtf16, (ID3D11Device*)device, &info, NVSDK_NGX_Version_API);
                 ngxStatus = NVSDK_NGX_D3D11_GetCapabilityParameters(&ctx.ngxContext.params);
 
                 if (ctx.computeD3D12)
                 {
                     chi::Device deviceD3D12;
                     CHI_CHECK_RF(ctx.computeD3D12->getDevice(deviceD3D12));
-                    ngxStatus = NVSDK_NGX_D3D12_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), documentsDataPath, (ID3D12Device*)deviceD3D12, &info, NVSDK_NGX_Version_API);
+                    ngxStatus = NVSDK_NGX_D3D12_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), slPluginPathUtf16, (ID3D12Device*)deviceD3D12, &info, NVSDK_NGX_Version_API);
                     ngxStatus = NVSDK_NGX_D3D12_GetCapabilityParameters(&ctx.ngxContextD3D12.params);
                 }
             }
             else if (deviceType == RenderAPI::eD3D12)
             {
-                ngxStatus = NVSDK_NGX_D3D12_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), documentsDataPath, (ID3D12Device*)device, &info, NVSDK_NGX_Version_API);
+                ngxStatus = NVSDK_NGX_D3D12_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), slPluginPathUtf16, (ID3D12Device*)device, &info, NVSDK_NGX_Version_API);
                 ngxStatus = NVSDK_NGX_D3D12_GetCapabilityParameters(&ctx.ngxContext.params);
             }
             else
             {
                 VkDevices* slVkDevices = (VkDevices*)device;
 
-                ngxStatus = NVSDK_NGX_VULKAN_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), documentsDataPath, slVkDevices->instance, slVkDevices->physical, slVkDevices->device, nullptr/* TODO TBD plumb in vkGetInstanceProcAddr*/, nullptr/* TODO TBD plumb in vkGetDeviceProcAddr*/, &info, NVSDK_NGX_Version_API);
+                ngxStatus = NVSDK_NGX_VULKAN_Init_with_ProjectID(projectId.c_str(), (NVSDK_NGX_EngineType)engine, engineVersion.c_str(), slPluginPathUtf16, slVkDevices->instance, slVkDevices->physical, slVkDevices->device, nullptr/* TODO TBD plumb in vkGetInstanceProcAddr*/, nullptr/* TODO TBD plumb in vkGetDeviceProcAddr*/, &info, NVSDK_NGX_Version_API);
                 ngxStatus = NVSDK_NGX_VULKAN_GetCapabilityParameters(&ctx.ngxContext.params);
             }
         }
@@ -1533,34 +1537,34 @@ bool slOnPluginStartup(const char* jsonConfig, void* device)
 #endif
             if (deviceType == RenderAPI::eD3D11)
             {
-                ngxStatus = NVSDK_NGX_D3D11_Init(appId, documentsDataPath, (ID3D11Device*)device, &info, NVSDK_NGX_Version_API);
+                ngxStatus = NVSDK_NGX_D3D11_Init(appId, slPluginPathUtf16, (ID3D11Device*)device, &info, NVSDK_NGX_Version_API);
                 ngxStatus = NVSDK_NGX_D3D11_GetCapabilityParameters(&ctx.ngxContext.params);
 
                 if (ctx.computeD3D12)
                 {
                     chi::Device deviceD3D12;
                     CHI_CHECK_RF(ctx.computeD3D12->getDevice(deviceD3D12));
-                    ngxStatus = NVSDK_NGX_D3D12_Init(appId, documentsDataPath, (ID3D12Device*)deviceD3D12, &info, NVSDK_NGX_Version_API);
+                    ngxStatus = NVSDK_NGX_D3D12_Init(appId, slPluginPathUtf16, (ID3D12Device*)deviceD3D12, &info, NVSDK_NGX_Version_API);
                     ngxStatus = NVSDK_NGX_D3D12_GetCapabilityParameters(&ctx.ngxContextD3D12.params);
                 }
             }
             else if (deviceType == RenderAPI::eD3D12)
             {
-                ngxStatus = NVSDK_NGX_D3D12_Init(appId, documentsDataPath, (ID3D12Device*)device, &info, NVSDK_NGX_Version_API);
+                ngxStatus = NVSDK_NGX_D3D12_Init(appId, slPluginPathUtf16, (ID3D12Device*)device, &info, NVSDK_NGX_Version_API);
                 ngxStatus = NVSDK_NGX_D3D12_GetCapabilityParameters(&ctx.ngxContext.params);
             }
             else
             {
                 VkDevices* slVkDevices = (VkDevices*)device;
 
-                ngxStatus = NVSDK_NGX_VULKAN_Init(appId, documentsDataPath, slVkDevices->instance, slVkDevices->physical, slVkDevices->device, nullptr/* TODO TBD plumb in vkGetInstanceProcAddr*/, nullptr/* TODO TBD plumb in vkGetDeviceProcAddr*/, &info, NVSDK_NGX_Version_API);
+                ngxStatus = NVSDK_NGX_VULKAN_Init(appId, slPluginPathUtf16, slVkDevices->instance, slVkDevices->physical, slVkDevices->device, nullptr/* TODO TBD plumb in vkGetInstanceProcAddr*/, nullptr/* TODO TBD plumb in vkGetDeviceProcAddr*/, &info, NVSDK_NGX_Version_API);
                 ngxStatus = NVSDK_NGX_VULKAN_GetCapabilityParameters(&ctx.ngxContext.params);
             }
         }
 
         if (ngxStatus == NVSDK_NGX_Result_Success)
         {
-            SL_LOG_HINT("NGX loaded - app id %u - application data path %S", appId, documentsDataPath);
+            SL_LOG_HINT("NGX loaded - app id %u - application data path %S", appId, slPluginPathUtf16);
 
             if (!hasProjectId && appId == kTemporaryAppId)
             {

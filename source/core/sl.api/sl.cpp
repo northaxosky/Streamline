@@ -75,7 +75,6 @@ void ConfigureLogOverridesFromInterposerConfig(log::ILog* log)
 
 void ConfigureLogOverridesFromRegistry(log::ILog* log)
 {
-#ifdef SL_WINDOWS
     constexpr const wchar_t* kRegSubKey = L"SOFTWARE\\NVIDIA Corporation\\Global\\Streamline";
     constexpr const wchar_t* kEnableConsoleValue = L"EnableConsoleLogging";
     constexpr const wchar_t* kLogLevelValue = L"LogLevel";
@@ -112,7 +111,6 @@ void ConfigureLogOverridesFromRegistry(log::ILog* log)
     {
         SL_LOG_HINT("Overriding logging settings from registry keys");
     }
-#endif
 }
 
 void ConfigureLogOverridesFromEnvironment(log::ILog* log)
@@ -243,24 +241,20 @@ sl::Result slInit(const Preferences &pref, uint64_t sdkVersion)
                 if (config.waitForDebugger)
                 {
                     SL_LOG_INFO("Waiting for debugger to attach ...");
-#ifdef SL_WINDOWS
                     while (!IsDebuggerPresent())
                     {
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     }
-#endif
                 }
             }
 #endif
 
             // Check to see if RenderDoc is present and notify the user
-#ifdef SL_WINDOWS
             HMODULE renderDocMod = GetModuleHandleA("renderdoc.dll");
             if (renderDocMod)
             {
                 SL_LOG_WARN("RenderDoc has been detected.  As RenderDoc disables NVAPI, any plugins which require NVAPI will be disabled.");
             }
-#endif
 
             auto manager = plugin_manager::getInterface();
             if (manager->isInitialized())
@@ -362,7 +356,8 @@ Result slSetTagCommon(const sl::ViewportHandle& viewport, const sl::ResourceTag*
     //! added in a new structure which is then chained. This assert ensures
     //! that new element(s) are NOT added in the middle of a structure.
     static_assert(offsetof(sl::ResourceTag, extent) == 48, "new elements can only be added at the end of each structure");
-    static_assert(offsetof(sl::Resource, reserved) == 104, "new elements can only be added at the end of each structure");
+    static_assert(offsetof(sl::Resource, internalFlags) == 104, "new elements can only be added at the end of each structure");
+    static_assert(offsetof(sl::Resource, reserved) == 106, "new elements can only be added at the end of each structure");
 
     SL_EXCEPTION_HANDLE_START;
     SL_CHECK(slValidateState());

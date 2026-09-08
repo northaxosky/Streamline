@@ -25,9 +25,11 @@
 #include <cmath>
 #include <d3dcompiler.h>
 #include <future>
+#include <system_error>
 #include <wrl/client.h>
 
 #include "source/core/sl.log/log.h"
+#include "source/core/sl.param/parameters.h"
 #include "source/core/sl.interposer/d3d12/d3d12.h"
 #include "source/platforms/sl.chi/d3d12.h"
 #include "shaders/copy_to_buffer_cs.h"
@@ -58,6 +60,7 @@ static const bool sPixAvailable{ LoadLibraryW(L"WinPixEventRuntime.dll") != null
 
 #include "external/nsight-sdk/SystemsGraphics/include/NGFX_D3D12.h"
 #include "external/nsight-sdk/SystemsGraphics/include/NGFX_GraphicsCapture_D3D12.h"
+#include "external/nsight-sdk/SystemsGraphics/include/NGFX_GPUTrace_D3D12.h"
 #include "external/nsight-sdk/SystemsGraphics/include/NGFX_SystemProfiling_D3D12.h"
 
 inline constexpr auto ngfxFrameBoundaryType(bool isGenerated, bool isBegin)
@@ -409,11 +412,6 @@ public:
     {
         DXGI_FRAME_STATISTICS* frameStatsPtr = (DXGI_FRAME_STATISTICS*)frameStats;
         HRESULT hr = ((IDXGISwapChain*)chain)->GetFrameStatistics(frameStatsPtr);
-    }
-
-    void getLastPresentID(SwapChain chain, uint32_t& id) override
-    {
-        HRESULT hr = ((IDXGISwapChain*)chain)->GetLastPresentCount(&id);
     }
 
     void init(const char* debugName, ID3D12Device* device, ID3D12CommandQueue* queue, uint32_t count, bool useSharedFence)
@@ -776,19 +774,35 @@ public:
         return WaitStatus::eNoTimeout;
     }
 
+    // For diagnostics; set by D3D12::createCommandListContext.
+    param::IParameters* m_parameters{};
+
     uint32_t resolvePresentFlags(SwapChain targetSwapChain, uint32_t presentSyncInterval, uint32_t presentFlags) override
     {
         BOOL fullscreen{ FALSE };
         HRESULT hr{ ((IDXGISwapChain*)targetSwapChain)->GetFullscreenState(&fullscreen, nullptr) };
         if (FAILED(hr))
         {
-            SL_LOG_WARN("GetFullscreenState failed (0x%x)", hr);
+            // Host frame from the Reflex present marker; 0 when the app sends none.
+            uint32_t hostFrame{};
+            if (m_parameters) m_parameters->get(sl::param::latency::kMarkerPresentFrame, &hostFrame);
+            SL_LOG_WARN("Internal call to native IDXGISwapChain::GetFullscreenState failed for swap chain %p "
+                        "(HRESULT 0x%08X: %s, host frame %u).",
+                        targetSwapChain, static_cast<uint32_t>(hr),
+                        std::system_category().message(hr).c_str(), hostFrame);
         }
-        if (fullscreen || presentSyncInterval)
+        // DXGI_PRESENT_ALLOW_TEARING requires DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING on the
+        // swap chain — without it Present returns DXGI_ERROR_INVALID_CALL. Gate the OR
+        // on the actual capability so this layer is robust even if the proxy is created
+        // without tearing for any reason.
+        DXGI_SWAP_CHAIN_DESC desc{};
+        ((IDXGISwapChain*)targetSwapChain)->GetDesc(&desc);
+        const bool tearingCapable = (desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) != 0;
+        if (fullscreen || presentSyncInterval || !tearingCapable)
         {
             presentFlags &= ~DXGI_PRESENT_ALLOW_TEARING;
         }
-        else if (presentSyncInterval == 0)
+        else
         {
             presentFlags |= DXGI_PRESENT_ALLOW_TEARING;
         }
@@ -993,34 +1007,35 @@ ComputeStatus D3D12::init(Device device, param::IParameters* params)
     return ComputeStatus::eOk;
 }
 
-// Non-virtual: not all backends can initialize all NSight SDK activity types,
-// and the base class cannot provide a meaningful default implementation.
-void D3D12::initNsightActivity()
+bool D3D12::initNsightActivityImpl(NGFX_ActivityType activity)
 {
-    NGFX_SetLibraryLoadFn(nsightSecureLoadLibraryCallback);
+    NGFX_Result result{ NGFX_Result_Success };
+    switch (activity)
+    {
+        case NGFX_ActivityType_GraphicsCapture:
+        {
+            NGFX_GraphicsCapture_InitializeActivity_D3D12_Params p{ NGFX_GraphicsCapture_InitializeActivity_D3D12_Params_VER };
+            result = NGFX_GraphicsCapture_InitializeActivity_D3D12(&p);
+            break;
+        }
+        case NGFX_ActivityType_GPUTrace:
+        {
+            NGFX_GPUTrace_InitializeActivity_D3D12_Params p{ NGFX_GPUTrace_InitializeActivity_D3D12_Params_VER };
+            result = NGFX_GPUTrace_InitializeActivity_D3D12(&p);
+            break;
+        }
+        case NGFX_ActivityType_SystemProfiling:
+        {
+            NGFX_SystemProfiling_InitializeActivity_D3D12_Params p{ NGFX_SystemProfiling_InitializeActivity_D3D12_Params_VER };
+            result = NGFX_SystemProfiling_InitializeActivity_D3D12(&p);
+            break;
+        }
+        default:
+            SL_LOG_VERBOSE("Unsupported NSight SDK activity (%d)!", activity);
+            return false;
+    }
 
-    NGFX_GraphicsCapture_InitializeActivity_D3D12_Params gfxParams{ NGFX_GraphicsCapture_InitializeActivity_D3D12_Params_VER };
-    NGFX_Result gfxResult{ NGFX_GraphicsCapture_InitializeActivity_D3D12(&gfxParams) };
-    if (gfxResult == NGFX_Result_Success)
-    {
-        m_nsightInitialized = true;
-        SL_LOG_INFO("NSight Graphics attached, capture activity initialized");
-    }
-    else
-    {
-        SL_LOG_VERBOSE("NSight Graphics not attached, capture activity initialization failed (%d)", gfxResult);
-        NGFX_SystemProfiling_InitializeActivity_D3D12_Params sysParams{ NGFX_SystemProfiling_InitializeActivity_D3D12_Params_VER };
-        NGFX_Result sysResult{ NGFX_SystemProfiling_InitializeActivity_D3D12(&sysParams) };
-        if (sysResult == NGFX_Result_Success)
-        {
-            m_nsightInitialized = true;
-            SL_LOG_INFO("NSight Systems attached, profiling activity initialized");
-        }
-        else
-        {
-            SL_LOG_VERBOSE("NSight Systems not attached, profiling activity initialization failed (%d)", sysResult);
-        }
-    }
+    return result == NGFX_Result_Success;
 }
 
 ComputeStatus D3D12::shutdown()
@@ -1369,6 +1384,7 @@ ComputeStatus D3D12::createCommandListContext(ChiCommandQueue *queue, uint32_t c
     auto tmp = new CommandListContext();
     tmp->init(friendlyName, m_device, (ID3D12CommandQueue*)queue, count, dx11On12);
     tmp->m_nsightInitialized = m_nsightInitialized;
+    tmp->m_parameters = m_parameters;
     ctx = tmp;
     return ComputeStatus::eOk;
 }
@@ -1469,9 +1485,16 @@ ComputeStatus D3D12::getFullscreenState(SwapChain chain, bool& fullscreen)
     IDXGISwapChain* swapChain = (IDXGISwapChain*)chain;
 
     BOOL fs = false;
-    if (FAILED(swapChain->GetFullscreenState(&fs, NULL)))
+    HRESULT hr = swapChain->GetFullscreenState(&fs, NULL);
+    if (FAILED(hr))
     {
-        SL_LOG_ERROR("Failed to get fullscreen state");
+        // Host frame from the Reflex present marker; 0 when the app sends none.
+        uint32_t hostFrame{};
+        m_parameters->get(sl::param::latency::kMarkerPresentFrame, &hostFrame);
+        SL_LOG_ERROR("Internal call to native IDXGISwapChain::GetFullscreenState failed for swap chain %p "
+                     "(HRESULT 0x%08X: %s, host frame %u).",
+                     swapChain, static_cast<uint32_t>(hr),
+                     std::system_category().message(hr).c_str(), hostFrame);
     }
 
     fullscreen = (bool)fs;
@@ -1482,9 +1505,16 @@ ComputeStatus D3D12::setFullscreenState(SwapChain chain, bool fullscreen, Output
 {
     if (!chain) return ComputeStatus::eInvalidArgument;
     IDXGISwapChain* swapChain = (IDXGISwapChain*)chain;
-    if (FAILED(swapChain->SetFullscreenState(fullscreen, (IDXGIOutput*)out)))
+    HRESULT hr = swapChain->SetFullscreenState(fullscreen, (IDXGIOutput*)out);
+    if (FAILED(hr))
     {
-        SL_LOG_ERROR( "Failed to set fullscreen state");
+        // Host frame from the Reflex present marker; 0 when the app sends none.
+        uint32_t hostFrame{};
+        m_parameters->get(sl::param::latency::kMarkerPresentFrame, &hostFrame);
+        SL_LOG_ERROR("Internal call to native IDXGISwapChain::SetFullscreenState failed for swap chain %p "
+                     "(requested state: %s, output: %p, HRESULT 0x%08X: %s, host frame %u).",
+                     swapChain, fullscreen ? "fullscreen" : "windowed", out,
+                     static_cast<uint32_t>(hr), std::system_category().message(hr).c_str(), hostFrame);
     }
     return ComputeStatus::eOk;
 }
@@ -2448,6 +2478,31 @@ ComputeStatus D3D12::cloneResource(Resource resource, Resource &clone, const cha
     {
         desc1.Flags &= ~D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
         initialState &= ~(ResourceState::eDepthStencilAttachmentRead | ResourceState::eDepthStencilAttachmentWrite);
+    }
+
+    // The clone is an internal scratch copy, so it only ever needs the capability flags SL manages
+    // above. Masking to this whitelist also strips any allocation-specific bits (e.g. D3D12 tight
+    // alignment) that legacy CreateCommittedResource rejects with E_INVALIDARG.
+    constexpr D3D12_RESOURCE_FLAGS kCloneKeptFlags =
+        D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET |
+        D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL |
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS |
+        D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
+
+    const D3D12_RESOURCE_FLAGS droppedFlags = desc1.Flags & ~kCloneKeptFlags;
+    if (droppedFlags != D3D12_RESOURCE_FLAG_NONE)
+    {
+        SL_LOG_WARN_ONCE("One or more tagged resources use unsupported clone flags that are being masked off "
+            "(e.g. resource '%s': dropped flags 0x%x). Further occurrences are not logged.",
+            friendlyName, (uint32_t)droppedFlags);
+        desc1.Flags &= kCloneKeptFlags; // drop tight-alignment + other unknown/unwanted bits
+    }
+    if (desc1.Alignment != 0)
+    {
+        SL_LOG_WARN_ONCE("One or more tagged resources use an unsupported alignment that is being overridden to 0 "
+            "(e.g. resource '%s': alignment %llu). Further occurrences are not logged.",
+            friendlyName, (uint64_t)desc1.Alignment);
+        desc1.Alignment = 0;            // let the runtime pick 4KB/64KB/4MB
     }
 
     auto type = desc1.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER ? ResourceType::eBuffer : ResourceType::eTex2d;

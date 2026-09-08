@@ -157,13 +157,6 @@ inline std::vector<uint8_t> read(const wchar_t* fname)
     return ret_buffer;
 }
 
-inline const wchar_t* getTmpPath()
-{
-    static std::wstring g_result;
-    g_result = fs::temp_directory_path().wstring();
-    return g_result.c_str();
-}
-
 // Required when using symlinks
 inline std::string getRealPath(const char* filename)
 {

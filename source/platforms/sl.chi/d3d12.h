@@ -301,9 +301,9 @@ class D3D12 : public Generic
         return (D3D12_RESOURCE_STATES)res;
     }
 
-    void initNsightActivity();
-
 protected:
+    bool initNsightActivityImpl(NGFX_ActivityType activity) override final;
+
 #if SL_ENABLE_PROFILING
     ComputeStatus beginProfilingImpl(CommandList cmdList, const char* marker, uint8_t r, uint8_t g, uint8_t b) override final;
     ComputeStatus endProfilingImpl(CommandList cmdList) override final;

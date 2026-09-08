@@ -48,6 +48,10 @@ constexpr const char* kSwapchainBufferCount = "sl.param.global.swapchainbufferco
 constexpr const char* kDebugMode = "sl.param.global.dbgMode";
 constexpr const char* kPFunGetTag = "sl.param.global.getTag";
 constexpr const char* kVulkanTable = "sl.param.global.vulkanTable";
+// Set by the interposer at vkCreateDevice time to the final synchronization2-enabled state of the
+// device. Carried as a param (not a VkTable field) so it stays OTA-safe: an older interposer never
+// sets it, and get() then returns false, so OTA-updated sl.chi falls back to the v1 vkQueueSubmit.
+constexpr const char* kVulkanSynchronization2Enabled = "sl.param.global.vulkanSync2Enabled";
 constexpr const char* kPreferenceFlags = "sl.param.global.prefFlags";
 constexpr const char* kOtaDenylistDenied = "sl.param.global.otaDenylistDenied";
 }
@@ -55,6 +59,7 @@ constexpr const char* kOtaDenylistDenied = "sl.param.global.otaDenylistDenied";
 namespace interposer
 {
 constexpr const char* kVKValidationActive = "sl.param.interposer.vkValidationActive";
+constexpr const char* kPFunGetSurfaceWindow = "sl.param.interposer.getSurfaceWindow";
 }
 
 namespace common
@@ -141,6 +146,7 @@ constexpr const char* kCurrentFrame = "sl.param.debug_plugin.frame";
 namespace imgui
 {
 constexpr const char* kInterface = "sl.param.imgui.interface";
+constexpr const char* kShowUI = "sl.param.imgui.showUI";
 }
 
 namespace dlss_d

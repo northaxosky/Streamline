@@ -22,12 +22,7 @@
 
 #pragma once
 
-#ifdef SL_WINDOWS
 #include <windows.h>
-#else
-#include <stdarg.h>
-#include "include/sl.h"
-#endif
 #include <string>
 #include <atomic>
 #include <cassert>

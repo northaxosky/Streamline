@@ -70,9 +70,9 @@ typedef void* (*NGFX_LoadLibraryFnPtr)(const NGFX_PathChar* libName);
 typedef enum NGFX_ActivityType
 {
     NGFX_ActivityType_GraphicsCapture = 0, /**< Graphics Capture activity type. */
-    NGFX_ActivityType_GPUTrace = 1, /**< GPU Trace activity type. */
+    NGFX_ActivityType_GPUTrace = 1,        /**< GPU Trace activity type. */
     NGFX_ActivityType_SystemProfiling = 2, /**< System Profiling activity type. */
-    NGFX_ActivityType_COUNT, /**< Total count of activity types. */
+    NGFX_ActivityType_COUNT,               /**< Total count of activity types. */
 } NGFX_ActivityType;
 
 /**
@@ -88,7 +88,7 @@ typedef enum NGFX_ApiType
     NGFX_ApiType_CUDA = 2,   /**< CUDA applications. */
     NGFX_ApiType_CUDART = 3, /**< CUDA runtime applications. */
     NGFX_ApiType_OpenGL = 4, /**< OpenGL applications. */
-    NGFX_ApiType_COUNT, /**< Total count of APIs types. */
+    NGFX_ApiType_COUNT,      /**< Total count of APIs types. */
 } NGFX_ApiType;
 
 /**
@@ -156,7 +156,6 @@ typedef enum NGFX_For_Dlss_DLSS_FG_PresentBoundaryType
 #else
 NGFX_For_Dlss_DLSS_FG_PresentBoundaryType;
 #endif
-
 
 /**
  * END addtogroup NGFX_API_CORE

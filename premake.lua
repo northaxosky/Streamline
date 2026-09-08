@@ -31,7 +31,9 @@ nvcfg.SL_DLSS_DN_PUBLIC_SDK = true
 
 
 
+
 nvcfg.SL_BUILD_LATEWARP = true
+
 
 
 
@@ -148,6 +150,7 @@ workspace "streamline"
 	configurations { "Debug", "Develop", "Production" }
 	platforms {
 		"x64",
+		"arm64",
 	}
 	architecture "x64"
 	language "c++"
@@ -169,10 +172,12 @@ workspace "streamline"
 	}
    	 
 	systemversion "latest"
-	defines { "SL_SDK", "SL_WINDOWS", "WIN32" , "WIN64" , "_CONSOLE", "NOMINMAX"}
+	defines { "SL_SDK", "WIN32" , "WIN64" , "_CONSOLE", "NOMINMAX"}
 
 	filter "platforms:x64"
 		architecture "x64"
+	filter "platforms:arm64"
+		architecture "arm64"
 	filter{}
 
 	-- when building any visual studio project
@@ -210,11 +215,11 @@ workspace "streamline"
 		buildmessage 'Compiling shader %{file.relpath} to DXBC/SPIRV with slang'
 		local shaders_output = out_dir() .. "shaders/"
         buildcommands {
-			path.translate(EXTERNAL .. "slang/bin/windows-x64/release/") .. 'slangc "%{file.relpath}" -entry main -target spirv -o "' .. shaders_output .. '%{file.basename}.spv"',
-			path.translate(EXTERNAL .. "slang/bin/windows-x64/release/") .. 'slangc "%{file.relpath}" -profile sm_5_0 -entry main -target dxbc -o "' .. shaders_output .. '%{file.basename}.cs"',
+			path.translate(EXTERNAL .. "slang/bin/windows-x64/release/") .. 'slangc.exe "%{file.relpath}" -entry main -target spirv -o "' .. shaders_output .. '%{file.basename}.spv"',
+			path.translate(EXTERNAL .. "slang/bin/windows-x64/release/") .. 'slangc.exe "%{file.relpath}" -profile sm_5_0 -entry main -target dxbc -o "' .. shaders_output .. '%{file.basename}.cs"',
 			'pushd ' .. path.translate(shaders_output),
-			'powershell.exe -NoProfile -ExecutionPolicy Bypass ' .. path.translate(TOOLS) .. 'bin2cheader.ps1 -i "%{file.basename}.spv" > "%{file.basename}_spv.h"',
-			'powershell.exe -NoProfile -ExecutionPolicy Bypass ' .. path.translate(TOOLS) .. 'bin2cheader.ps1 -i "%{file.basename}.cs" > "%{file.basename}_cs.h"',
+			'powershell.exe -NoProfile -ExecutionPolicy Bypass ' .. path.translate(TOOLS) .. 'bin2cheader.ps1 -i "%{file.basename}.spv" -o "%{file.basename}_spv.h"',
+			'powershell.exe -NoProfile -ExecutionPolicy Bypass ' .. path.translate(TOOLS) .. 'bin2cheader.ps1 -i "%{file.basename}.cs" -o "%{file.basename}_cs.h"',
 			'popd'
 		 }
 		 buildoutputs { shaders_output .. "%{file.basename}.spv", shaders_output .. "%{file.basename}.cs" }
@@ -225,7 +230,7 @@ workspace "streamline"
 		buildcommands {
 			'copy "%{file.relpath}" "' .. json_output .. '%{file.name}"',
 			'pushd ' .. path.translate(json_output),
-			'powershell.exe -NoProfile -ExecutionPolicy Bypass ' .. path.translate(TOOLS) .. 'bin2cheader.ps1 -i "%{file.basename}.json" > "' .. json_output .. '%{file.basename}_json.h"',
+			'powershell.exe -NoProfile -ExecutionPolicy Bypass ' .. path.translate(TOOLS) .. 'bin2cheader.ps1 -i "%{file.basename}.json" -o "%{file.basename}_json.h"',
 			'popd'
 		}
 		-- One or more outputs resulting from the build (required)
@@ -244,19 +249,26 @@ group ""
 
 group "core"
 
+-- Generates _artifacts/gitVersion.h. Every project that #includes the header
+-- declares `dependson { "gitversion" }` so this runs once per msbuild
+-- invocation before any dependent compiles, instead of racing as a prebuild
+-- on each project.
+project "gitversion"
+	kind "Utility"
+	targetdir (out_dir())
+	prebuildcommands { 'pushd ' .. path.translate(out_dir()), path.translate(TOOLS) .. "gitVersion.bat", 'popd' }
+
 project "sl.interposer"
 	kind "SharedLib"
 	targetdir (out_dynamic_lib_dir())
 	objdir (out_obj_dir())
 	characterset ("MBCS")
 	staticruntime "off"
-	
-	prebuildcommands { 'pushd ' .. path.translate(out_dir()), path.translate(TOOLS) .. "gitVersion.bat", 'popd' }
+
+	dependson { "gitversion" }
 
 	
-	filter { filter_platforms }
-		includedirs { "./external/nvapi" }
-	filter{}
+	includedirs { "./external/nvapi" }
 
 
 	defines {"SL_INTERPOSER"}
@@ -303,6 +315,8 @@ project "sl.interposer"
 
 	filter { filter_platforms }
 		links {EXTERNAL .. "nvapi/amd64/nvapi64.lib"}
+	filter "platforms:arm64"
+		links {EXTERNAL .. "nvapi/aarch64/nvapia64.lib"}
 	filter{}
 	
 	vpaths { ["manager"] = {"./source/core/sl.plugin-manager/**.h", "./source/core/sl.plugin-manager/**.cpp" }}
@@ -336,9 +350,7 @@ project "sl.compute"
 	dependson { "sl.interposer"}
 
 
-	filter { filter_platforms }
-		includedirs { "./external/nvapi" }
-	filter{}
+	includedirs { "./external/nvapi" }
 
 	if (os.isfile(EXTERNAL .. "slang/bin/windows-x64/release/slangc.exe")) then
 	files {
@@ -354,11 +366,16 @@ project "sl.compute"
 		"./source/platforms/sl.chi/d3d11.h",
 		"./source/platforms/sl.chi/vulkan.cpp",
 		"./source/platforms/sl.chi/vulkan.h",
+		"./source/platforms/sl.chi/vknvll2.cpp",
+		"./source/platforms/sl.chi/vknvll2.h",
+		"./source/platforms/sl.chi/vulkannv.h",
 		"./source/platforms/sl.chi/generic.cpp",
 		"./source/core/sl.security/**.h",
 		"./source/core/sl.security/**.cpp"
 	}
-	filter { "options:with-nvllvk=yes" }
+	filter { "options:with-nvllvk=yes"
+	, "not platforms:arm64"
+	}
 		defines { "SL_WITH_NVLLVK" }
 		files { "./source/platforms/sl.chi/nvllvk.cpp" }
 	filter {}
@@ -371,10 +388,14 @@ group ""
 group "plugins"
 
 function pluginBasicSetup(name)
+	dependson { "gitversion" }
 
 	filter { filter_platforms }
 		includedirs { "./external/nvapi" }
 		links {EXTERNAL .. "nvapi/amd64/nvapi64.lib"}
+	filter "platforms:arm64"
+		includedirs { "./external/nvapi" }
+		links {EXTERNAL .. "nvapi/aarch64/nvapia64.lib"}
 	filter{}
 
 	implibdir (out_static_lib_dir())
@@ -435,6 +456,9 @@ project "sl.common"
 	filter { filter_platforms }
 		libdirs {EXTERNAL .. "nvapi/amd64", EXTERNAL .. "ngx-sdk/Lib/Windows_x86_64", EXTERNAL .. "pix/bin", EXTERNAL .. "reflex-sdk-vk/lib"}
 		links { "nvapi64.lib" }
+	filter "platforms:arm64"
+		libdirs {EXTERNAL .. "nvapi/aarch64", EXTERNAL .. "ngx-sdk/Lib/Windows_aarch64", EXTERNAL .. "pix/bin"}
+		links { "nvapia64.lib" }
 	filter{}
     links
     {     
@@ -453,7 +477,9 @@ project "sl.common"
 		links { "nvsdk_ngx_d.lib"}
 	filter {}
 
-	filter { "options:with-nvllvk=yes" }
+	filter { "options:with-nvllvk=yes"
+	, "not platforms:arm64"
+	}
 		defines { "SL_WITH_NVLLVK" }
 		links { "NvLowLatencyVk.lib" }
 		linkoptions { "/DELAYLOAD:NvLowLatencyVk.dll" }
@@ -482,6 +508,8 @@ if (os.isdir("./source/plugins/sl.dlss_g")) then
 		links { "Winmm.lib", "Version.lib" }
 		filter { filter_platforms }
 			links {EXTERNAL .. "nvapi/amd64/nvapi64.lib"}
+		filter "platforms:arm64"
+			links {EXTERNAL .. "nvapi/aarch64/nvapia64.lib"}
 		filter{}
 
 		vpaths {["impl"] = { "./source/plugins/sl.dlss_g/**.h", "./source/plugins/sl.dlss_g/**.cpp" }}
@@ -636,6 +664,8 @@ project "sl.imgui"
 	removefiles {"./source/core/sl.extra/extra.cpp"}
 
 
+	removeplatforms {"arm64"}
+
 	libdirs {EXTERNAL .."vulkan/Lib"}
 
 	links { "d3d12.lib", "vulkan-1.lib"}
@@ -706,6 +736,7 @@ if (os.isdir("./source/plugins/sl.nvperf")) then
 		defines {"_SILENCE_CXX23_ALIGNED_STORAGE_DEPRECATION_WARNING"}
 				
 		removefiles {"./source/core/sl.extra/extra.cpp"}
+		removeplatforms {"arm64"}
 		
 		libdirs {EXTERNAL .."vulkan/Lib"}
 

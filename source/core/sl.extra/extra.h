@@ -22,9 +22,7 @@
 
 #pragma once
 
-#if SL_WINDOWS
 #include <windows.h>
-#endif
 #include <string>
 #include <vector>
 #include <functional>
@@ -140,7 +138,6 @@ inline bool setEnvVar(const char* varName, const char* value)
     return (SetEnvironmentVariableA(varName, value) != 0);
 }
 
-#if SL_WINDOWS
 inline bool getRegistryDword(const WCHAR *InRegKeyHive, const WCHAR *InRegKeyName, DWORD *OutValue)
 {
     HKEY Key;
@@ -174,7 +171,6 @@ inline bool getRegistryString(const WCHAR *InRegKeyHive, const WCHAR *InRegKeyNa
     }
     return false;
 };
-#endif
 
 // Returns a microseconds string as seconds:mseconds:useconds
 inline std::string prettifyMicrosecondsString(const uint64_t microseconds)
@@ -280,9 +276,7 @@ struct TAverageValueMeter
 {
     TAverageValueMeter()
     {
-#ifdef SL_WINDOWS
         QueryPerformanceFrequency(&frequency);
-#endif
     };
 
     TAverageValueMeter(const TAverageValueMeter& rhs) { operator=(rhs); }
@@ -293,11 +287,9 @@ struct TAverageValueMeter
         val = rhs.val.load();
         sum = rhs.sum;
         window = rhs.window;
-#ifdef SL_WINDOWS
         frequency = rhs.frequency;
         startTime = rhs.startTime;
         elapsedUs = rhs.elapsedUs;
-#endif
         return *this;
     }
 
@@ -309,24 +301,19 @@ struct TAverageValueMeter
         sum = 0;
         mean = 0;
         std::fill(window.begin(), window.end(), 0);
-#ifdef SL_WINDOWS
         startTime = {};
         elapsedUs = {};
-#endif
     }
 
     //! NOT thread safe
     void begin()
     {
-#ifdef SL_WINDOWS
         QueryPerformanceCounter(&startTime);
-#endif
     }
 
     //! NOT thread safe
     void end()
     {
-#ifdef SL_WINDOWS
         if (startTime.QuadPart > 0)
         {
             LARGE_INTEGER endTime{};
@@ -337,7 +324,6 @@ struct TAverageValueMeter
             auto elapsedMs = elapsedUs.QuadPart / 1000.0;
             add(elapsedMs);
         }
-#endif
     }
 
     //! NOT thread safe
@@ -414,11 +400,9 @@ private:
     double sum{};
     std::array<double, WINDOW_SIZE> window;
 
-#ifdef SL_WINDOWS
     LARGE_INTEGER frequency{};
     LARGE_INTEGER startTime{};
     LARGE_INTEGER elapsedUs{};
-#endif
 };
 typedef TAverageValueMeter<kAverageMeterWindowSize> AverageValueMeter;
 

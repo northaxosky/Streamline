@@ -197,8 +197,6 @@ extern "C" {
     _M(GPUTrace, NGFX_GPUTrace, StartTraceOpenGL, NGFX_GPUTrace_StartTrace_OpenGL_Params*)                      \
     _M(GPUTrace, NGFX_GPUTrace, StopTraceOpenGL, NGFX_GPUTrace_StopTrace_OpenGL_Params*)
 
-
-
 /**
  * @brief Macro to define all System profiling function pointers.
  */
@@ -377,8 +375,7 @@ NGFX_GLOBAL NGFX_Globals g_NGFX_Globals =
         {
             NGFX_FOR_EACH_GPU_TRACE_FN(NGFX_INITIALIZE_FUNC_TABLE_ENTRY)
                 NGFX_FOR_EACH_GPU_TRACE_CUDA_FN(NGFX_INITIALIZE_FUNC_TABLE_ENTRY)
-                    NGFX_FOR_EACH_GPU_TRACE_OPENGL_FN(NGFX_INITIALIZE_FUNC_TABLE_ENTRY)
-        },
+                    NGFX_FOR_EACH_GPU_TRACE_OPENGL_FN(NGFX_INITIALIZE_FUNC_TABLE_ENTRY)},
 
         // SystemProfiling
         {
@@ -911,8 +908,11 @@ NGFX_FUNCTION NGFX_Result NGFX_IsActivityInjected(NGFX_ActivityType activityType
         return NGFX_Result_InvalidParameter;
     }
 
+    *injected = false;
+
     if (g_NGFX_Globals.injectedActivityType == activityType)
     {
+        *injected = true;
         return NGFX_Result_Success;
     }
 
@@ -927,11 +927,52 @@ NGFX_FUNCTION NGFX_Result NGFX_IsActivityInjected(NGFX_ActivityType activityType
     }
     else if (result == NGFX_Result_LibNotFound)
     {
-        *injected = false;
         return NGFX_Result_Success;
     }
 
     return result;
+}
+
+/**
+ * @brief Returns the activity that is injected
+ *
+ * This function will return the activity that is injected upon success; if no activity is injected,
+ * will return NGFX_Result_InvalidState and NGFX_ActivityType_COUNT
+ *
+ * @param activityType Pointer to an enum that indicates the injected activity type
+ * @return NGFX_Result indicating success or failure of the operation.
+ */
+NGFX_FUNCTION NGFX_Result NGFX_GetInjectedActivity(NGFX_ActivityType* injectedActivityType)
+{
+    if (!injectedActivityType)
+    {
+        NGFX_LOG("NGFX_GetInjectedActivity: Invalid parameter - injectedActivityType is NULL");
+        return NGFX_Result_InvalidParameter;
+    }
+
+    if (g_NGFX_Globals.injectedActivityType != NGFX_ActivityType_COUNT)
+    {
+        *injectedActivityType = g_NGFX_Globals.injectedActivityType;
+        return NGFX_Result_Success;
+    }
+
+    for (int i = 0; i < NGFX_ActivityType_COUNT; ++i)
+    {
+        bool injected = false;
+        NGFX_ActivityType activityType = (NGFX_ActivityType)i;
+
+        if (NGFX_IsActivityInjected(activityType, &injected) == NGFX_Result_Success)
+        {
+            if (injected)
+            {
+                *injectedActivityType = activityType;
+                return NGFX_Result_Success;
+            }
+        }
+    }
+
+    *injectedActivityType = NGFX_ActivityType_COUNT;
+    return NGFX_Result_InvalidState;
 }
 
 /**
@@ -1599,7 +1640,7 @@ NGFX_FUNCTION NGFX_Result NGFX_Do_EnumerateInstallationsFromEnv(NGFX_Installatio
     {
 
         NGFX_Injection_SKU sku = NGFX_Injection_SKU_PUBLIC;
-        sku = NGFX_Injection_SKU_INTERNAL;
+        sku = NGFX_Injection_SKU_PUBLIC;
 
         // Add installation using helper function
         bool added = NGFX_Do_AddVersion(installations, maxInstallations, numInstallations, developmentInstallationPath, UINT16_MAX, UINT16_MAX, UINT16_MAX, sku);
@@ -1620,7 +1661,7 @@ NGFX_FUNCTION NGFX_Result NGFX_Do_EnumerateInstallationsFromEnv(NGFX_Installatio
     if (developmentInstallationPath && *developmentInstallationPath && *numInstallations < maxInstallations)
     {
         NGFX_Injection_SKU sku = NGFX_Injection_SKU_PUBLIC;
-        sku = NGFX_Injection_SKU_INTERNAL;
+        sku = NGFX_Injection_SKU_PUBLIC;
 
         // Use the cross-platform helper
         bool added = NGFX_Do_AddVersion(installations, maxInstallations, numInstallations, developmentInstallationPath, UINT16_MAX, UINT16_MAX, UINT16_MAX, sku);

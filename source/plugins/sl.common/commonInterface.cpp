@@ -23,7 +23,6 @@
 #include <map>
 #include <vector>
 
-#if defined(SL_WINDOWS)
 // Prevent warnings from MS headers
 #define WIN32_NO_STATUS
 #include <windows.h>
@@ -32,7 +31,6 @@
 #include <Winternl.h>
 #include <d3dkmthk.h>
 #include <d3dkmdt.h>
-#endif
 
 #include "include/sl.h"
 #include "source/core/sl.api/internal.h"
@@ -136,7 +134,6 @@ uint64_t getCurrentFrame()
 //! 
 bool getSystemCaps(common::SystemCaps*& info)
 {
-#if defined(SL_WINDOWS)
     ctx.sysCaps = {};
     info = &ctx.sysCaps;
 
@@ -334,7 +331,6 @@ bool getSystemCaps(common::SystemCaps*& info)
     {
         FreeLibrary(modGDI32);
     }
-#endif
     return true;
 }
 
@@ -573,8 +569,13 @@ sl::Result slEvaluateFeatureInternal(sl::Feature feature, const sl::FrameToken& 
 
 //! D3D12
 
-void presentCommon(UINT Flags, void* nativeSwapChain = nullptr, const std::vector<chi::SyncPoint>& presentSyncPoints = {})
+void presentCommon(UINT Flags, void* nativeSwapChain = nullptr, const std::vector<chi::SyncPoint>& presentSyncPoints = {}, chi::Fence* additionalPresentWaitSemaphore = nullptr)
 {
+    if (additionalPresentWaitSemaphore)
+    {
+        *additionalPresentWaitSemaphore = {};
+    }
+
     if ((Flags & DXGI_PRESENT_TEST))
     {
         return;

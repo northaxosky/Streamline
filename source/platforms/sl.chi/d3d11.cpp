@@ -21,9 +21,11 @@
 */
 
 #include <d3d11_4.h>
+#include <system_error>
 #include <wrl/client.h>
 
 #include "source/core/sl.log/log.h"
+#include "source/core/sl.param/parameters.h"
 #include "source/platforms/sl.chi/d3d11.h"
 #include "nvapi.h"
 #include "_artifacts/shaders/copy_cs.h"
@@ -244,15 +246,22 @@ struct D3D11CommandListContext : public ICommandListContext
     {
         BOOL fullscreen = FALSE;
         ((IDXGISwapChain*)chain)->GetFullscreenState(&fullscreen, nullptr);
-        if (fullscreen || sync)
+        // DXGI_PRESENT_ALLOW_TEARING requires DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING on the
+        // swap chain — without it Present returns DXGI_ERROR_INVALID_CALL. Gate the OR
+        // on the actual capability so this layer is robust even if the proxy is created
+        // without tearing for any reason.
+        DXGI_SWAP_CHAIN_DESC desc{};
+        ((IDXGISwapChain*)chain)->GetDesc(&desc);
+        const bool tearingCapable = (desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) != 0;
+        if (fullscreen || sync || !tearingCapable)
         {
             flags &= ~DXGI_PRESENT_ALLOW_TEARING;
         }
-        else if (sync == 0)
+        else
         {
             flags |= DXGI_PRESENT_ALLOW_TEARING;
         }
-        
+
         HRESULT res{};
         if (params)
         {
@@ -266,13 +275,6 @@ struct D3D11CommandListContext : public ICommandListContext
     }
 
     void getFrameStats(SwapChain chain, void* frameStats)
-    {
-        assert(false);
-        SL_LOG_ERROR("Not implemented");
-        return;
-    }
-
-    void getLastPresentID(SwapChain chain, uint32_t& id)
     {
         assert(false);
         SL_LOG_ERROR("Not implemented");
@@ -758,9 +760,16 @@ ComputeStatus D3D11::setFullscreenState(SwapChain chain, bool fullscreen, Output
 {
     if (!chain) return ComputeStatus::eInvalidArgument;
     IDXGISwapChain* swapChain = (IDXGISwapChain*)chain;
-    if (FAILED(swapChain->SetFullscreenState(fullscreen, (IDXGIOutput*)out)))
+    HRESULT hr = swapChain->SetFullscreenState(fullscreen, (IDXGIOutput*)out);
+    if (FAILED(hr))
     {
-        SL_LOG_ERROR( "Failed to set fullscreen state");
+        // Host frame from the Reflex present marker; 0 when the app sends none.
+        uint32_t hostFrame{};
+        m_parameters->get(sl::param::latency::kMarkerPresentFrame, &hostFrame);
+        SL_LOG_ERROR("Internal call to native IDXGISwapChain::SetFullscreenState failed for swap chain %p "
+                     "(requested state: %s, output: %p, HRESULT 0x%08X: %s, host frame %u).",
+                     swapChain, fullscreen ? "fullscreen" : "windowed", out,
+                     static_cast<uint32_t>(hr), std::system_category().message(hr).c_str(), hostFrame);
     }
     return ComputeStatus::eOk;
 }

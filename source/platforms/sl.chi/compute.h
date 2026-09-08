@@ -27,9 +27,7 @@
 #include "source/core/sl.extra/extra.h"
 #include "source/core/sl.log/log.h"
 
-#if defined(SL_WINDOWS)
 #include <unknwn.h>
-#endif
 
 #if defined(SL_DEBUG)
 #define ASSERT_ONLY_CODE 1
@@ -418,9 +416,16 @@ struct ICommandListContext
     virtual int present(SwapChain chain, uint32_t sync, uint32_t flags, void* params = nullptr) = 0;
     virtual uint32_t resolvePresentFlags(SwapChain targetSwapChain, uint32_t presentSyncInterval, uint32_t presentFlags) { return presentFlags; }
     virtual void getFrameStats(SwapChain chain, void* frameStats) = 0;
-    virtual void getLastPresentID(SwapChain chain, uint32_t& id) = 0;
     virtual void waitForVblank(SwapChain chain) = 0;
     virtual void monitoringThreadTick() { assert(false); }
+
+    // Reflex/LL2 (Vulkan only): set the app frame id that this context's subsequent work submits
+    // carry, via VkLatencySubmissionPresentIdNV chained onto each vkQueueSubmit. Callers set it once
+    // per frame before submitting; passing 0 ("no frame") leaves the previous id in place. Tagging
+    // each submit directly - rather than relying on the driver's "reuse last id on this queue" rule -
+    // keeps frame attribution race-free even when SL shares a queue with the app. Default no-op on
+    // D3D and the NvAPI v1 path. See CommandListContextVK::executeCommandList.
+    virtual void setLatencyFrameId(uint64_t frameId) {}
 
     bool m_nsightInitialized{ false };
 
@@ -544,11 +549,12 @@ enum class VendorId : uint32_t
     eNVDA = 0x10DE,
     eAMD = 0x1002,
     eIntel = 0x8086,
+    eNVDA_ACPI = 0x4144564e, // reverse of string 'NVDA', See bug 3936088
 };
 
 inline bool isVendorNvidia(VendorId id)
 {
-    return id == VendorId::eNVDA;
+    return id == VendorId::eNVDA || id == VendorId::eNVDA_ACPI;
 }
 
 
@@ -596,6 +602,30 @@ public:
     virtual ComputeStatus getInstance(Instance& instance) = 0;
     virtual ComputeStatus getPhysicalDevice(PhysicalDevice& device) = 0;
     virtual ComputeStatus getHostQueueInfo(chi::CommandQueue queue, void* pQueueInfo) = 0;
+
+    // Reflex/LL2 latency-id attribution (Vulkan only). When the app drives explicit attribution, SL
+    // tags each of its own work submits with the app frame id by chaining VkLatencySubmissionPresentIdNV
+    // onto the submit (see ICommandListContext::setLatencyFrameId and the Vulkan submit path). The id
+    // is the app frame index - shared by all presents of a batch, hence "latency id" rather than a
+    // per-present id.
+
+    // Whether LL2 latency ids should be applied to SL's submissions. The driver requires
+    // all-or-nothing tagging: SL may tag its own submissions only when the application also tags
+    // its own with VkLatencySubmissionPresentIdNV. Mixing tagged and untagged submissions in a
+    // frame corrupts attribution, so SL must match the app exactly.
+    //
+    // This currently ALWAYS returns false (SL never tags; the driver uses implicit marker-based
+    // attribution, which is the known-good path). We have no reliable way yet to learn whether the
+    // app tags its submissions: SL cannot observe the app's vkQueueSubmit (apps call it directly,
+    // bypassing SL's interposer), and the all-or-nothing rule means guessing is unsafe in either
+    // direction. The two viable detection options for later: (1) a new Streamline API the app sets
+    // to declare it tags explicitly, or (2) a query to the Vulkan driver, if one becomes available.
+    virtual bool areLatencyIdsEnabled() const { return false; }
+
+    // Whether the active Reflex backend actually consumes VkLatencySubmissionPresentIdNV (i.e. the
+    // VK_NV_low_latency2 path is in use). False on D3D and on the NvAPI v1 Vulkan path, where the
+    // detector should not run and SL must not tag. Lets callers skip the per-submit pNext walk.
+    virtual bool areLatencyIdsSupported() const { return false; }
 
     virtual ComputeStatus waitForIdle(Device device) = 0;
 
@@ -793,13 +823,28 @@ public:
     // Latency API
     virtual ComputeStatus setSleepMode(const ReflexOptions& consts) = 0;
     virtual ComputeStatus getSleepStatus(ReflexState& settings) = 0;
+    virtual ComputeStatus getFrameGenParams(uint8_t& outFgMultiplier, bool& outDfgControl) { return ComputeStatus::eNotSupported; }
     virtual ComputeStatus getLatencyReport(ReflexState& settings) = 0;
     virtual ComputeStatus sleep() = 0;
     virtual ComputeStatus setReflexMarker(PCLMarker marker, uint64_t frameId) = 0;
     virtual ComputeStatus notifyOutOfBandCommandQueue(ChiCommandQueue* queue, OutOfBandCommandQueueType type) = 0;
     virtual ComputeStatus setAsyncFrameMarker(CommandQueue queue, PCLMarker marker, uint64_t frameId) = 0;
     virtual ComputeStatus setLatencyMarker(CommandQueue queue, PCLMarker marker, uint64_t frameId) = 0;
-    
+    virtual ComputeStatus setReflexSync(bool enable, int32_t timeInQueueUs, uint32_t timeInQueueUsTarget, uint32_t vblankIntervalUs) { return ComputeStatus::eNotSupported; }
+    virtual ComputeStatus setReflexSyncFG(uint8_t dfgMaxMultiplier, uint32_t dfgTargetFps, uint8_t fgMultiplier) { return ComputeStatus::eNotSupported; }
+
+    // Whether the application emits its own regular PRESENT_START/END Reflex markers. On Vulkan there
+    // is a single latency-marker channel (NvLL_VK_SetLatencyMarker), unlike D3D's separate async
+    // channel, so if both the app and SL emit PRESENT markers they double-stamp the driver. SL
+    // therefore suppresses its own PRESENT markers only when the app owns them; when the app does not
+    // (e.g. Unity, which cannot emit present markers) SL keeps supplying them. Detected by the Reflex
+    // plugin and latched here. No-op on D3D, where the two marker channels are distinct.
+    virtual bool appOwnsPresentMarkers() const { return false; }
+    virtual void setAppOwnsPresentMarkers(bool owns) {}
+
+    virtual ComputeStatus notifyCreateSwapchain(SwapChain chain, bool isLatencyModeEnabled){ return ComputeStatus::eOk; }
+    virtual ComputeStatus notifyDestroySwapchain(SwapChain chain){ return ComputeStatus::eOk; }
+
     // Sharing API
     virtual ComputeStatus fetchTranslatedResourceFromCache(ICompute* otherAPI, ResourceType type, Resource res, TranslatedResource& shared, const char friendlyName[] = "") = 0;
     virtual ComputeStatus prepareTranslatedResources(CommandList cmdList, const std::vector<std::pair<chi::TranslatedResource, chi::ResourceDescription>>& resourceList) = 0;
