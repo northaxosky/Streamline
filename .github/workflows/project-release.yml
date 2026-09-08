@@ -138,8 +138,7 @@ jobs:
           $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
           $include = (Resolve-Path (Split-Path -Parent $env:PUBLIC_HEADER)).Path
           New-Item -ItemType Directory -Force _artifacts/project-release/verifier | Out-Null
-          $command = @(
-            "call `"$vcvars`" >nul",
+          $compile = @(
             "cl /nologo /std:c++20 /EHsc /W4 /WX /DNOMINMAX",
             "/I . /I `"$include`"",
             "/DSL_PROJECT_TRUST_CONFIG_HEADER=\`"projectTrust.generated.h\`"",
@@ -149,6 +148,7 @@ jobs:
             "/Fo:_artifacts\project-release\verifier\",
             "/Fe:_artifacts\project-release\verifier\project-release-verifier.exe"
           ) -join " "
+          $command = "call `"$vcvars`" >nul && $compile"
           & $env:ComSpec /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -160,11 +160,18 @@ jobs:
           if (-not $env:STREAMLINE_SIGNING_KEY) {
             throw "STREAMLINE_SIGNING_KEY is not configured."
           }
-          $key = Join-Path $env:RUNNER_TEMP "streamline-release-private.pem"
+          $keyDirectory = Join-Path $env:RUNNER_TEMP (
+            "streamline-signing-" + [guid]::NewGuid().ToString("N"))
+          $key = Join-Path $keyDirectory "streamline-release-private.pem"
           try {
+            New-Item -ItemType Directory $keyDirectory | Out-Null
+            & icacls $keyDirectory /inheritance:r `
+              /grant:r "$env:USERNAME`:(OI)(CI)F" "SYSTEM`:(OI)(CI)F" | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to restrict the temporary signing directory."
+            }
             $bytes = [Convert]::FromBase64String($env:STREAMLINE_SIGNING_KEY)
             [IO.File]::WriteAllBytes($key, $bytes)
-            & icacls $key /inheritance:r /grant:r "$env:USERNAME`:F" "SYSTEM`:F" | Out-Null
             ./tools/project-signing.ps1 -Mode Sign `
               -SpecPath "$env:CANDIDATE/provenance/release-spec.json" `
               -InputDirectory "$env:CANDIDATE/package/bin/x64" `
@@ -174,6 +181,7 @@ jobs:
           }
           finally {
             Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $keyDirectory -Force -ErrorAction SilentlyContinue
             Remove-Item Env:STREAMLINE_SIGNING_KEY -ErrorAction SilentlyContinue
           }
 
