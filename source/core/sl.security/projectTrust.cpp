@@ -40,6 +40,7 @@
 #endif
 
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "wintrust.lib")
 
 namespace sl::security
 {
@@ -215,6 +216,90 @@ bool isKnownNvidiaModule(std::string_view basename)
         "sl.reflex.dll",
     };
     return std::find(names.begin(), names.end(), basename) != names.end();
+}
+
+bool isNgxModule(std::string_view basename)
+{
+    return basename.starts_with("nvngx_");
+}
+
+TrustFailure hashBuffer(
+    const uint8_t* data,
+    size_t size,
+    std::array<uint8_t, 32>& digest);
+
+bool verifyPinnedNvidiaNgxSignature(const wchar_t* fullPath)
+{
+    WINTRUST_FILE_INFO fileData{};
+    fileData.cbStruct = sizeof(fileData);
+    fileData.pcwszFilePath = fullPath;
+
+    WINTRUST_SIGNATURE_SETTINGS signatureSettings{};
+    signatureSettings.cbStruct = sizeof(signatureSettings);
+    signatureSettings.dwFlags =
+        WSS_GET_SECONDARY_SIG_COUNT | WSS_VERIFY_SPECIFIC;
+
+    CERT_STRONG_SIGN_PARA strongPolicy{};
+    strongPolicy.cbSize = sizeof(strongPolicy);
+    strongPolicy.dwInfoChoice = CERT_STRONG_SIGN_OID_INFO_CHOICE;
+    strongPolicy.pszOID =
+        const_cast<char*>(szOID_CERT_STRONG_SIGN_OS_CURRENT);
+    signatureSettings.pCryptoPolicy = &strongPolicy;
+
+    WINTRUST_DATA trustData{};
+    trustData.cbStruct = sizeof(trustData);
+    trustData.dwUIChoice = WTD_UI_NONE;
+    trustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+    trustData.dwUnionChoice = WTD_CHOICE_FILE;
+    trustData.pFile = &fileData;
+    trustData.dwStateAction = WTD_STATEACTION_VERIFY;
+    trustData.pSignatureSettings = &signatureSettings;
+
+    GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    const LONG status = WinVerifyTrust(
+        nullptr, &policy, &trustData);
+    bool valid = status == ERROR_SUCCESS;
+    if (valid)
+    {
+        const CRYPT_PROVIDER_DATA* provider =
+            WTHelperProvDataFromStateData(trustData.hWVTStateData);
+        const CRYPT_PROVIDER_SGNR* signer = provider ?
+            WTHelperGetProvSignerFromChain(
+                const_cast<CRYPT_PROVIDER_DATA*>(provider),
+                0, FALSE, 0) : nullptr;
+        const PCCERT_CONTEXT certificate =
+            signer && signer->csCertChain ?
+                signer->pasCertChain[0].pCert : nullptr;
+        std::array<uint8_t, 32> publicKeyHash{};
+        valid = certificate &&
+            hashBuffer(
+                certificate->pCertInfo->SubjectPublicKeyInfo.PublicKey.pbData,
+                certificate->pCertInfo->SubjectPublicKeyInfo.PublicKey.cbData,
+                publicKeyHash) == TrustFailure::eOk;
+        constexpr std::array<uint8_t, 32> nvidiaNgxPublicKeyHash
+        {
+            0xd5, 0x5f, 0x28, 0xff, 0x6a, 0x2a, 0x66, 0xa1,
+            0x8c, 0x56, 0x6c, 0x9c, 0x70, 0xcd, 0xd0, 0x48,
+            0xed, 0xe1, 0xcd, 0x0e, 0xc2, 0xe6, 0x6e, 0x56,
+            0x9a, 0x2d, 0x47, 0xb6, 0x99, 0xe0, 0x04, 0xa0
+        };
+        valid = valid && publicKeyHash == nvidiaNgxPublicKeyHash;
+    }
+    trustData.dwStateAction = WTD_STATEACTION_CLOSE;
+    WinVerifyTrust(nullptr, &policy, &trustData);
+    return valid;
+}
+
+bool verifyNvidiaModuleSignature(
+    std::string_view basename,
+    const wchar_t* fullPath)
+{
+    // NGX binaries carry NVIDIA's primary Authenticode signature but not the
+    // nested Streamline plugin signature. Their exact bytes remain bound by
+    // the project-signed manifest.
+    return isNgxModule(basename) ?
+        verifyPinnedNvidiaNgxSignature(fullPath) :
+        verifyEmbeddedSignature(fullPath);
 }
 
 bool roleMatchesBasename(ProjectFileRole role, std::string_view basename)
@@ -746,7 +831,8 @@ ProjectLoadResult authenticateAndLoadProjectLibrary(const ProjectLoadOptions& op
             return fail(TrustFailure::eFileHashMismatch);
         }
         if (entry.role == ProjectFileRole::eNvidiaModule &&
-            !verifyNvidiaEmbeddedSignature(opened.identityPath.c_str()))
+            !verifyNvidiaModuleSignature(
+                entry.basename, opened.identityPath.c_str()))
         {
             return fail(TrustFailure::eNvidiaSignatureInvalid);
         }

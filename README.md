@@ -76,6 +76,15 @@ private trust component, strict detached manifest format, offline signing
 procedure, and security scope. Locally built unsigned DLLs are not release-ready
 and continue to be rejected by the default `Production` trust policy.
 
+Project releases use `.github/workflows/project-release.yml`: a trusted-main
+build job tests and assembles the pinned runtime, then the protected
+`streamline-release` environment signs and publishes it. The only secret is
+`STREAMLINE_SIGNING_KEY`, containing the base64-encoded PKCS#8 PEM release key.
+Public release identity and upstream pins live only in
+`config/project-release.psd1`; `tools/project-release.ps1 -Mode
+GeneratePublicHeader` produces the stable build input
+`_artifacts/project-release/include/projectTrust.generated.h`.
+
 #### (Optional) Compiling Shaders
 
 If you would like to recompile the shaders for the NIS plugin, you will need to have Python 3 installed and in the path.
