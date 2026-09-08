@@ -602,9 +602,14 @@ bool PluginManager::loadPlugin(const fs::path pluginFullPath, Plugin **ppPlugin)
         *plugin = nullptr;
     };
 
-    HMODULE mod = security::loadLibrary(pluginFullPath.c_str());
+    security::TrustFailure trustFailure{};
+    HMODULE mod = security::loadLibrary(pluginFullPath.c_str(), &trustFailure);
     if (!mod)
     {
+        SL_LOG_ERROR(
+            "Refusing to load '%ls': %s",
+            pluginFullPath.c_str(),
+            security::getTrustFailureMessage(trustFailure));
         return false;
     }
 

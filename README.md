@@ -70,6 +70,12 @@ Once the project is built for a configuration, the built, unsigned DLLs may be f
 
 Obviously, `sl.dlss_g.dll` cannot be built from source and thus the prebuilt copy must be used.
 
+Project-owned `Production` package signing is disabled by default. See
+[Project-owned Streamline package signing](docs/ProjectSigning.md) for the
+private trust component, strict detached manifest format, offline signing
+procedure, and security scope. Locally built unsigned DLLs are not release-ready
+and continue to be rejected by the default `Production` trust policy.
+
 #### (Optional) Compiling Shaders
 
 If you would like to recompile the shaders for the NIS plugin, you will need to have Python 3 installed and in the path.
