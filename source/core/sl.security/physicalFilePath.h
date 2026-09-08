@@ -23,6 +23,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <windows.h>
 
 namespace sl::security
@@ -34,11 +35,28 @@ namespace sl::security
 // identityPath is safe for file authentication. loadPath is compatible with
 // LoadLibraryExW, and boundLoadHandle remains open so the caller can retain the
 // identity check through the load. The caller owns boundLoadHandle.
+// On Wine, the loader accepts the exact NT-DOS name recorded for the opened
+// file. Restrictive Wine handles protect the object from in-prefix replacement,
+// but native host processes remain outside that enforcement boundary.
 bool getPhysicalFilePaths(
     HANDLE file,
     std::wstring& identityPath,
     std::wstring& loadPath,
     HANDLE& boundLoadHandle,
     DWORD& systemError);
+
+#if defined(SL_PHYSICAL_FILE_PATH_TESTS)
+namespace detail
+{
+bool getWineMappedLoadPathForTests(
+    std::wstring_view native,
+    std::wstring& loadPath);
+
+bool fileIdsMatchForTests(
+    const FILE_ID_INFO& expected,
+    const FILE_ID_INFO& candidate,
+    bool requireVolumeIdentity);
+}
+#endif
 
 }

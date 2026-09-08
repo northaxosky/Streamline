@@ -51,7 +51,18 @@ rewrite back to a logical alias. Local authentication uses the mount manager's
 volume-GUID path; loading uses a mount-manager path that is independently
 reopened, file-ID matched, and retained through `LoadLibraryExW`. UNC paths are
 likewise reopened and identity matched. Per-session DOS aliases are never used
-to select the load path, and unsupported device identities fail closed. The initial bounded
+to select the load path, and unsupported device identities fail closed.
+
+Wine and Proton report mapped files as their original NT-DOS
+`\??\X:\...` names rather than Windows device paths. When Wine is positively
+identified through its `ntdll` export, the verifier accepts only a canonical
+absolute drive form, reopens that exact loader-compatible name, requires a
+nonzero volume identity and matching file ID, and retains both restrictive
+handles through the load. Wine enforces those share restrictions for processes
+inside the prefix. Native host processes that can rewrite the prefix filesystem
+are outside the trusted-host boundary, and USVFS path rewriting under Proton
+still requires runtime qualification. Unsupported Wine namespaces and
+identities fail closed without changing the native Windows path policy. The initial bounded
 implementation revalidates the selected package for each plugin load rather
 than retaining a process-lifetime cache; this keeps resolver and file-identity
 semantics simple at the cost of additional startup-only I/O.

@@ -295,6 +295,7 @@ $trustInclude = Split-Path -Parent $trustHeader
 $testExe = Join-Path $artifacts "project-trust-regression.exe"
 & $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX /DNOMINMAX `
     /DSL_PRODUCTION /DSL_PROJECT_TRUST_TEST_CONFIG `
+    /DSL_PHYSICAL_FILE_PATH_TESTS `
     "/I$root" "/I$trustInclude" `
     (Join-Path $PSScriptRoot "project-trust-regression.cpp") `
     $physicalPathSource `
