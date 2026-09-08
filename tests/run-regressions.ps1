@@ -67,4 +67,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Present result regression test failed."
 }
 
+& (Join-Path $PSScriptRoot "run-project-trust-regressions.ps1")
+if ($LASTEXITCODE -ne 0) {
+    throw "Project trust regressions failed."
+}
+
 Write-Host "Streamline regression tests passed."
