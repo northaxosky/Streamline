@@ -65,10 +65,7 @@ jobs:
         run: |
           $include = (Resolve-Path (Split-Path -Parent $env:PUBLIC_HEADER)).Path
           $env:CL = "/I`"$include`" /DSL_PROJECT_TRUST_CONFIG_HEADER=\`"projectTrust.generated.h\`""
-          msbuild _project/vs2022/sl.interposer.vcxproj /t:Rebuild /m /nologo `
-            /verbosity:minimal /p:Configuration=Production /p:Platform=x64
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          msbuild _project/vs2022/sl.common.vcxproj /t:Rebuild /m /nologo `
+          msbuild _project/vs2022/streamline.sln /t:Rebuild /m /nologo `
             /verbosity:minimal /p:Configuration=Production /p:Platform=x64
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
