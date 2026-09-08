@@ -299,6 +299,9 @@ int wmain(int argc, wchar_t** argv)
     expectFailure(fixtureRoot, cases, "wrong-basename", TrustFailure::eManifestMalformed);
     expectFailure(fixtureRoot, cases, "wrong-digest", TrustFailure::eFileHashMismatch);
     expectFailure(fixtureRoot, cases, "wrong-size", TrustFailure::eFileSizeMismatch);
+    expectFailure(
+        fixtureRoot, cases, "unsigned-ngx",
+        TrustFailure::eNvidiaSignatureInvalid);
     expectFailure(fixtureRoot, cases, "wrong-release", TrustFailure::eManifestReleaseMismatch);
     expectFailure(fixtureRoot, cases, "wrong-key-id", TrustFailure::eManifestUnknownKey);
     expectFailure(

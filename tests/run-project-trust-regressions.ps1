@@ -30,7 +30,9 @@ if (-not $physicalPathText.Contains("GetMappedFileNameW") -or
 $haveNvidiaFixture =
     (Test-Path (Join-Path $qualificationRoot "sl.interposer.dll") -PathType Leaf) -and
     (Test-Path (Join-Path $qualificationRoot "sl.common.dll") -PathType Leaf) -and
-    (Test-Path (Join-Path $qualificationRoot "sl.dlss_g.dll") -PathType Leaf)
+    (Test-Path (Join-Path $qualificationRoot "sl.dlss_g.dll") -PathType Leaf) -and
+    (Test-Path (Join-Path $qualificationRoot "nvngx_dlss.dll") -PathType Leaf) -and
+    (Test-Path (Join-Path $qualificationRoot "nvngx_dlssg.dll") -PathType Leaf)
 
 Remove-Item -LiteralPath $artifacts -Recurse -Force -ErrorAction SilentlyContinue
 foreach ($directory in @(
@@ -183,7 +185,14 @@ function Write-Case(
 
 $interposer = Join-Path $fixtureRoot "sl.interposer.dll"
 $common = Join-Path $fixtureRoot "sl.common.dll"
+$unsignedNgx = Join-Path $fixtureRoot "nvngx_dlss.dll"
+Copy-Item $interposer $unsignedNgx
 $standard = @(
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "unsigned-ngx" @(
+    New-Entry "nvngx_dlss.dll" 3 $unsignedNgx
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )
@@ -254,6 +263,8 @@ $unsupportedVersion[8] = 2
 
 if ($haveNvidiaFixture) {
     Write-Case "mixed" @(
+        New-Entry "nvngx_dlss.dll" 3 (Join-Path $qualificationRoot "nvngx_dlss.dll")
+        New-Entry "nvngx_dlssg.dll" 3 (Join-Path $qualificationRoot "nvngx_dlssg.dll")
         New-Entry "sl.common.dll" 2 (Join-Path $qualificationRoot "sl.common.dll")
         New-Entry "sl.dlss_g.dll" 3 (Join-Path $qualificationRoot "sl.dlss_g.dll")
         New-Entry "sl.interposer.dll" 1 (Join-Path $qualificationRoot "sl.interposer.dll")

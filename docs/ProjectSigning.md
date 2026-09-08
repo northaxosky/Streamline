@@ -30,8 +30,12 @@ Both entries are required. The `NvidiaModule` role accepts only the shipped
 `nvngx_dlssg`, `sl.deepdvc`, `sl.directsr`, `sl.dlss`, `sl.dlss_d`,
 `sl.dlss_g`, `sl.imgui`, `sl.nis`, `sl.nvperf`, `sl.pcl`, and `sl.reflex`
 DLL basenames. These files must pass the existing NVIDIA embedded-signature
-verifier in addition to their signed manifest size and digest. There is no
-wildcard role, and any other `sl.*.dll` beside a community manifest is refused.
+policy in addition to their signed manifest size and digest. Streamline plugins
+retain the nested Streamline-key check. NGX binaries, which do not carry that
+nested signature, must pass Windows' strong primary Authenticode policy and the
+pinned NVIDIA NGX signer public-key check while their exact bytes remain
+authorized by the project-signed manifest. There is no wildcard role, and any
+other `sl.*.dll` beside a community manifest is refused.
 
 The verifier calls its physical resolver independently for every logical
 basename. A future game adapter should resolve each winner through its own
@@ -85,54 +89,18 @@ separator, drive marker, `..`, absolute path, or case ambiguity. Unknown
 versions, roles, key IDs, trailing bytes, truncation, and overflow are rejected.
 The compiled trust policy also requires one exact release ID.
 
-## Offline key ceremony and signing
+## Release automation
 
-Use PowerShell 7/.NET offline. Never put the release private key in this
-repository or under a game/SDK directory. Keep it access-controlled, offline,
-and backed up. One-time key generation (choose external protected paths):
-
-```powershell
-pwsh ./tools/project-signing.ps1 -Mode GenerateKey `
-  -KeyId 1 -ReleaseId sdk-2.12.0-project-1 `
-  -PrivateKeyPath X:\offline\streamline-release-private.pk8.pem `
-  -PublicKeyPath .\_artifacts\signing\streamline-release-public.spki.pem `
-  -PublicConfigPath .\_artifacts\signing\projectTrust.generated.h
-```
-
-This exports an ECDSA P-256 PKCS#8 private PEM, an SPKI public PEM, and a
-public-only build configuration. Supply that reviewed configuration at compile
-time as a quoted include path through `SL_PROJECT_TRUST_CONFIG_HEADER`. Do not
-enable it until the release public key, key ID, and release ID have been
-reviewed. No placeholder or test key is trusted by default.
-
-Create an explicit JSON spec:
-
-```json
-{
-  "releaseId": "sdk-2.12.0-project-1",
-  "keyId": 1,
-  "files": [
-    { "name": "sl.common.dll", "role": "ProjectCommon" },
-    { "name": "sl.interposer.dll", "role": "ProjectInterposer" },
-    { "name": "sl.dlss_g.dll", "role": "NvidiaModule" }
-  ]
-}
-```
-
-Sign exact files from one explicit input directory:
-
-```powershell
-pwsh ./tools/project-signing.ps1 -Mode Sign `
-  -SpecPath X:\offline\release-spec.json `
-  -InputDirectory X:\offline\staged-sdk `
-  -PrivateKeyPath X:\offline\streamline-release-private.pk8.pem `
-  -ManifestPath X:\offline\out\sl.project-manifest.bin `
-  -SignaturePath X:\offline\out\sl.project-manifest.sig
-```
-
-The tool does not discover, store, or log private keys. It refuses to overwrite
-outputs and hashes only the exact allowlisted basenames in the explicit input
-directory.
+`config/project-release.psd1` is the single public source for the release ID,
+key ID, public key, upstream archive, and exact NVIDIA binary pins.
+`tools/project-release.ps1 -Mode GeneratePublicHeader` produces
+`_artifacts/project-release/include/projectTrust.generated.h` for SDK and
+consumer builds. `.github/workflows/project-release.yml` accepts only the exact
+configured tag on trusted `main`: a secretless job builds, tests, and assembles
+the candidate before the protected `streamline-release` environment uses the
+single base64-encoded PKCS#8 PEM secret `STREAMLINE_SIGNING_KEY`. The key exists
+only in a restricted temporary file during the signing step and is deleted
+before verification and publication.
 
 ## Security scope
 
