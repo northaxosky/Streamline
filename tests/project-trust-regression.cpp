@@ -205,6 +205,72 @@ void checkDosAliasBinding(const fs::path& fixture)
         "alias-resistant physical path retains the authenticated file identity");
 }
 
+void checkWinePathControls()
+{
+    std::wstring loadPath;
+    check(
+        detail::getWineMappedLoadPathForTests(
+            L"\\??\\C:\\Games\\Fallout 4\\sl.common.dll",
+            loadPath) &&
+        loadPath == L"\\??\\C:\\Games\\Fallout 4\\sl.common.dll",
+        "Wine mapped drive path is preserved exactly for loading");
+    check(
+        detail::getWineMappedLoadPathForTests(
+            L"\\??\\z:\\home\\user\\game\\sl.common.dll",
+            loadPath),
+        "Wine mapped lowercase drive path is accepted");
+
+    for (const std::wstring_view invalid : {
+        L"\\Device\\HarddiskVolume1\\game\\sl.common.dll",
+        L"\\??\\C:game\\sl.common.dll",
+        L"\\??\\UNC\\server\\share\\sl.common.dll",
+        L"\\??\\unix\\home\\user\\sl.common.dll",
+        L"\\??\\GlobalRoot\\Device\\HarddiskVolume1\\sl.common.dll",
+        L"\\??\\C:\\game\\..\\sl.common.dll",
+        L"\\??\\C:\\game\\\\sl.common.dll",
+        L"\\??\\C:\\game/sl.common.dll",
+        L"\\??\\C:\\game\\sl.common.dll:stream",
+        L"\\??\\C:\\game\\sl.*.dll",
+        L"\\??\\C:\\game\\" })
+    {
+        check(
+            !detail::getWineMappedLoadPathForTests(
+                invalid, loadPath),
+            "unsupported Wine mapped path fails closed");
+    }
+
+    FILE_ID_INFO expected{};
+    expected.VolumeSerialNumber = 17;
+    expected.FileId.Identifier[0] = 42;
+    FILE_ID_INFO candidate = expected;
+    check(
+        detail::fileIdsMatchForTests(
+            expected, candidate, true),
+        "Wine identity accepts an exact volume and file ID match");
+
+    candidate.VolumeSerialNumber = 18;
+    check(
+        !detail::fileIdsMatchForTests(
+            expected, candidate, true),
+        "Wine identity rejects a cross-volume file ID collision");
+    candidate = expected;
+    candidate.FileId.Identifier[0] = 43;
+    check(
+        !detail::fileIdsMatchForTests(
+            expected, candidate, true),
+        "Wine identity rejects a different file ID");
+    expected.VolumeSerialNumber = 0;
+    candidate = expected;
+    check(
+        detail::fileIdsMatchForTests(
+            expected, candidate, false),
+        "native identity comparison preserves existing zero-volume behavior");
+    check(
+        !detail::fileIdsMatchForTests(
+            expected, candidate, true),
+        "Wine identity fails closed without volume scope");
+}
+
 }
 
 int wmain(int argc, wchar_t** argv)
@@ -228,6 +294,7 @@ int wmain(int argc, wchar_t** argv)
     const auto& trust = getCompiledProjectTrust();
     check(trust.configured, "ephemeral test trust is compiled into the test executable");
     checkDosAliasBinding(fixtureRoot / "sl.interposer.dll");
+    checkWinePathControls();
 
     const fs::path validManifest = cases / "valid.bin";
     const fs::path validSignature = cases / "valid.sig";

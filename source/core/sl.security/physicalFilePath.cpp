@@ -78,11 +78,90 @@ bool startsWithPathPrefix(std::wstring_view path, std::wstring_view prefix)
         _wcsnicmp(path.data(), prefix.data(), prefix.size()) == 0;
 }
 
+bool isWine()
+{
+    static const bool detected = []()
+        {
+            const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+            return ntdll &&
+                GetProcAddress(ntdll, "wine_get_version") != nullptr;
+        }();
+    return detected;
+}
+
+bool getWineMappedLoadPath(
+    std::wstring_view native,
+    std::wstring& loadPath)
+{
+    constexpr std::wstring_view prefix = L"\\??\\";
+    if (!native.starts_with(prefix) ||
+        native.size() <= prefix.size() + 3)
+    {
+        return false;
+    }
+
+    const size_t drive = prefix.size();
+    const wchar_t letter = native[drive];
+    if (!((letter >= L'A' && letter <= L'Z') ||
+          (letter >= L'a' && letter <= L'z')) ||
+        native[drive + 1] != L':' ||
+        native[drive + 2] != L'\\')
+    {
+        return false;
+    }
+
+    size_t component = drive + 3;
+    for (size_t i = component; i <= native.size(); ++i)
+    {
+        if (i != native.size() && native[i] != L'\\')
+        {
+            const wchar_t c = native[i];
+            if (c < L' ' || c == L'/' || c == L':' ||
+                c == L'"' || c == L'<' || c == L'>' ||
+                c == L'|' || c == L'*' || c == L'?')
+            {
+                return false;
+            }
+            continue;
+        }
+
+        const std::wstring_view part =
+            native.substr(component, i - component);
+        if (part.empty() || part == L"." || part == L"..")
+        {
+            return false;
+        }
+        component = i + 1;
+    }
+
+    loadPath.assign(native);
+    return true;
+}
+
+bool fileIdsMatch(
+    const FILE_ID_INFO& expected,
+    const FILE_ID_INFO& candidate,
+    bool requireVolumeIdentity)
+{
+    if (requireVolumeIdentity &&
+        (!expected.VolumeSerialNumber ||
+         !candidate.VolumeSerialNumber))
+    {
+        return false;
+    }
+    return expected.VolumeSerialNumber == candidate.VolumeSerialNumber &&
+        std::memcmp(
+            expected.FileId.Identifier,
+            candidate.FileId.Identifier,
+            sizeof(expected.FileId.Identifier)) == 0;
+}
+
 bool bindSameIdentity(
     HANDLE expected,
     const std::wstring& path,
     HANDLE& bound,
-    DWORD& systemError)
+    DWORD& systemError,
+    bool requireVolumeIdentity = false)
 {
     UniqueHandle candidate(CreateFileW(
         path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
@@ -103,13 +182,14 @@ bool bindSameIdentity(
         systemError = GetLastError();
         return false;
     }
-    if (expectedId.VolumeSerialNumber != candidateId.VolumeSerialNumber ||
-        std::memcmp(
-            expectedId.FileId.Identifier,
-            candidateId.FileId.Identifier,
-            sizeof(expectedId.FileId.Identifier)) != 0)
+    if (!fileIdsMatch(
+        expectedId, candidateId, requireVolumeIdentity))
     {
-        systemError = ERROR_FILE_INVALID;
+        systemError =
+            requireVolumeIdentity &&
+            (!expectedId.VolumeSerialNumber ||
+             !candidateId.VolumeSerialNumber) ?
+            ERROR_NOT_SUPPORTED : ERROR_FILE_INVALID;
         return false;
     }
     bound = static_cast<HANDLE>(candidate.release());
@@ -262,6 +342,19 @@ bool getPhysicalFilePaths(
     }
     native.resize(length);
 
+    if (isWine())
+    {
+        if (!getWineMappedLoadPath(native, loadPath))
+        {
+            systemError = ERROR_NOT_SUPPORTED;
+            return false;
+        }
+        identityPath = loadPath;
+        return bindSameIdentity(
+            file, loadPath, boundLoadHandle,
+            systemError, true);
+    }
+
     constexpr std::wstring_view networkPrefix = L"\\Device\\Mup";
     if (startsWithPathPrefix(native, networkPrefix))
     {
@@ -275,5 +368,28 @@ bool getPhysicalFilePaths(
         native, file, identityPath, loadPath,
         boundLoadHandle, systemError);
 }
+
+#if defined(SL_PHYSICAL_FILE_PATH_TESTS)
+namespace detail
+{
+
+bool getWineMappedLoadPathForTests(
+    std::wstring_view native,
+    std::wstring& loadPath)
+{
+    return getWineMappedLoadPath(native, loadPath);
+}
+
+bool fileIdsMatchForTests(
+    const FILE_ID_INFO& expected,
+    const FILE_ID_INFO& candidate,
+    bool requireVolumeIdentity)
+{
+    return fileIdsMatch(
+        expected, candidate, requireVolumeIdentity);
+}
+
+}
+#endif
 
 }
