@@ -17,16 +17,24 @@ int main()
         std::cerr << "Exact public provider version was not selected.\n";
         return 1;
     }
-    if (sl::fsr::chooseProviderVersion(ids, names, "3.1.7", selected))
-    {
-        std::cerr << "Unavailable provider version was accepted.\n";
-        return 1;
-    }
-    if (sl::fsr::parseVersion("3.1", selected) ||
+    const sl::fsr::ProviderVersion retained = selected;
+    if (sl::fsr::chooseProviderVersion(ids, names, "3.1.7", selected) ||
+        sl::fsr::chooseProviderVersion(
+            std::span<const uint64_t>(ids.data(), ids.size() - 1),
+            names,
+            "3.1.5",
+            selected) ||
+        sl::fsr::chooseProviderVersion(ids, names, nullptr, selected) ||
+        sl::fsr::parseVersion("3.1", selected) ||
         sl::fsr::parseVersion("3.1.5-preview", selected) ||
-        sl::fsr::parseVersion(nullptr, selected))
+        sl::fsr::parseVersion(nullptr, selected) ||
+        selected.id != retained.id ||
+        selected.major != retained.major ||
+        selected.minor != retained.minor ||
+        selected.patch != retained.patch ||
+        selected.name != retained.name)
     {
-        std::cerr << "Malformed provider version was accepted.\n";
+        std::cerr << "Invalid provider data was accepted or changed the prior selection.\n";
         return 1;
     }
 

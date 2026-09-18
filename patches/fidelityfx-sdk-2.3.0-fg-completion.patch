@@ -254,7 +254,7 @@ index 6b5c585..cfa99de 100644
 -    rw_upscaled_output[iPxPos] = FfxFloat32x4(fColor, 1.f);
 +    rw_upscaled_output[iPxPos] = FfxFloat32x4(EncodeOutputColor(fColor), 1.f);
 diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
-index 287e09b..af71ab1 100644
+index 287e09b..fa66011 100644
 --- a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
 +++ b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
 @@ -46,3 +46,3 @@
@@ -268,15 +268,69 @@ index 287e09b..af71ab1 100644
 @@ -687 +687 @@ static FfxErrorCode fsr3UpscalerRelease(FfxFsr3UpscalerContext_Private* context)
 -#ifndef _GAMING_XBOX
 +#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
-@@ -1041,0 +1042,5 @@ static FfxErrorCode fsr3upscalerDispatch(FfxFsr3UpscalerContext_Private* context
+@@ -65,0 +66 @@
++#include "ffx_fsr3upscaler_color.h"
+@@ -1041,0 +1043,2 @@ static FfxErrorCode fsr3upscalerDispatch(FfxFsr3UpscalerContext_Private* context
 +    context->constants.inputColorTransferFunction =
-+        (params->flags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_GAMMA_2_2) ? 3u :
-+        (params->flags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_PQ) ? 2u :
-+        (params->flags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_SRGB) ? 1u :
-+        0u;
-@@ -1195 +1200 @@ static FfxErrorCode fsr3upscalerDispatch(FfxFsr3UpscalerContext_Private* context
++        ffxFsr3UpscalerGetInputColorTransferFunction(params->flags);
+@@ -1195 +1199 @@ static FfxErrorCode fsr3upscalerDispatch(FfxFsr3UpscalerContext_Private* context
 -#ifndef _GAMING_XBOX
 +#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
+diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_color.h b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_color.h
+new file mode 100644
+index 0000000..bde8713
+--- /dev/null
++++ b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_color.h
+@@ -0,0 +1,49 @@
++// This file is part of the FidelityFX SDK.
++//
++// Copyright (C) 2026 Advanced Micro Devices, Inc.
++//
++// Permission is hereby granted, free of charge, to any person obtaining a copy
++// of this software and associated documentation files(the "Software"), to deal
++// in the Software without restriction, including without limitation the rights
++// to use, copy, modify, merge, publish, distribute, sublicense, and /or sell
++// copies of the Software, and to permit persons to whom the Software is
++// furnished to do so, subject to the following conditions :
++//
++// The above copyright notice and this permission notice shall be included in
++// all copies or substantial portions of the Software.
++//
++// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++// THE SOFTWARE.
++
++#pragma once
++
++#include "../include/ffx_fsr3upscaler.h"
++#include "../../include/ffx_upscale.h"
++
++static inline uint32_t ffxFsr3UpscalerGetDispatchColorFlags(uint64_t apiFlags)
++{
++    uint32_t flags = 0;
++    if (apiFlags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB)
++        flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_SRGB;
++    if (apiFlags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ)
++        flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_PQ;
++    if (apiFlags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2)
++        flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_GAMMA_2_2;
++    return flags;
++}
++
++static inline uint32_t ffxFsr3UpscalerGetInputColorTransferFunction(uint32_t dispatchFlags)
++{
++    if (dispatchFlags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_GAMMA_2_2)
++        return 3u;
++    if (dispatchFlags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_PQ)
++        return 2u;
++    if (dispatchFlags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_SRGB)
++        return 1u;
++    return 0u;
++}
 diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h
 index a77d7f0..6d828fa 100644
 --- a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h
@@ -290,22 +344,13 @@ index a77d7f0..6d828fa 100644
 -#ifndef _GAMING_XBOX
 +#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
 diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
-index df59908..ab6b2b7 100644
+index df59908..1652f00 100644
 --- a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
 +++ b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
-@@ -392,0 +393,12 @@ ffxReturnCode_t ffxProvider_FSR3Upscale::Dispatch(ffxContext* context, const ffx
-+        if (desc->flags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB)
-+        {
-+            dispatchParameters.flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_SRGB;
-+        }
-+        if (desc->flags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ)
-+        {
-+            dispatchParameters.flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_PQ;
-+        }
-+        if (desc->flags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2)
-+        {
-+            dispatchParameters.flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_GAMMA_2_2;
-+        }
+@@ -29,0 +30 @@
++#include "ffx_fsr3upscaler_color.h"
+@@ -392,0 +394 @@ ffxReturnCode_t ffxProvider_FSR3Upscale::Dispatch(ffxContext* context, const ffx
++        dispatchParameters.flags |= ffxFsr3UpscalerGetDispatchColorFlags(desc->flags);
 diff --git a/Kits/FidelityFX/upscalers/include/ffx_upscale.h b/Kits/FidelityFX/upscalers/include/ffx_upscale.h
 index 021ac23..c623e37 100644
 --- a/Kits/FidelityFX/upscalers/include/ffx_upscale.h

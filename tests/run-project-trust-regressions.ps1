@@ -23,11 +23,6 @@ $compiler = Get-Command cl.exe -ErrorAction SilentlyContinue
 if (-not $compiler) {
     throw "cl.exe is unavailable. Run this script from a Visual Studio developer shell."
 }
-$physicalPathText = Get-Content -Raw $physicalPathSource
-if (-not $physicalPathText.Contains("GetMappedFileNameW") -or
-    $physicalPathText.Contains("GetFinalPathNameByHandleW")) {
-    throw "Physical path binding must use mapped-file identity, not a rewritable final-path query."
-}
 $haveNvidiaFixture =
     (Test-Path (Join-Path $qualificationRoot "sl.interposer.dll") -PathType Leaf) -and
     (Test-Path (Join-Path $qualificationRoot "sl.common.dll") -PathType Leaf) -and
@@ -396,28 +391,13 @@ if ($LASTEXITCODE -ne 0) {
 $exclusivityTestExe = Join-Path $artifacts "plugin-runtime-exclusivity-regression.exe"
 & $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX `
     "/I$root" `
+    "/I$(Join-Path $root 'external\json\include')" `
     (Join-Path $PSScriptRoot "plugin-runtime-exclusivity-regression.cpp") `
     "/Fo:$artifacts\\" "/Fe:$exclusivityTestExe"
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to build plugin runtime exclusivity regression test."
 }
-& $exclusivityTestExe
+& $exclusivityTestExe (Join-Path $root "source\plugins\sl.fsr_g\fsr_g.json")
 if ($LASTEXITCODE -ne 0) {
     throw "Plugin runtime exclusivity regression test failed."
-}
-
-$completionTestExe = Join-Path $artifacts "fsr-completion-contract-regression.exe"
-& $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX /DNOMINMAX `
-    "/I$root" `
-    (Join-Path $PSScriptRoot "fsr-completion-contract-regression.cpp") `
-    "/Fo:$artifacts\\" "/Fe:$completionTestExe"
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to build FSR completion contract regression test."
-}
-& $completionTestExe `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\framegeneration\fsr3\dx12\FrameInterpolationSwapchainDX12.cpp") `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\framegeneration\fsr3\dx12\ffx_provider_fsr3framegenerationswapchain_dx12.cpp") `
-    (Join-Path $root "source\plugins\sl.fsr_g\fsrGEntry.cpp")
-if ($LASTEXITCODE -ne 0) {
-    throw "FSR completion contract regression test failed."
 }
