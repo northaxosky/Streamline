@@ -369,11 +369,61 @@ int wmain(int argc, wchar_t** argv)
     expectFailure(
         fixtureRoot, cases, "unsigned-ngx",
         TrustFailure::eNvidiaSignatureInvalid);
+    expectFailure(
+        fixtureRoot.parent_path() / "unsigned-amd", cases, "unsigned-amd",
+        TrustFailure::eAmdSignatureInvalid,
+        L"amd_fidelityfx_loader_dx12.dll");
+    expectFailure(
+        fixtureRoot, cases, "wrong-project-plugin-role",
+        TrustFailure::eManifestMalformed);
+    expectFailure(
+        fixtureRoot, cases, "wrong-project-vendor-role",
+        TrustFailure::eManifestMalformed);
+    expectFailure(
+        fixtureRoot, cases, "wrong-project-vendor-basename",
+        TrustFailure::eManifestMalformed);
+    expectFailure(
+        fixtureRoot, cases, "wrong-amd-role",
+        TrustFailure::eManifestMalformed);
+    expectFailure(
+        fixtureRoot, cases, "wrong-amd-basename",
+        TrustFailure::eManifestMalformed);
     expectFailure(fixtureRoot, cases, "wrong-release", TrustFailure::eManifestReleaseMismatch);
     expectFailure(fixtureRoot, cases, "wrong-key-id", TrustFailure::eManifestUnknownKey);
     expectFailure(
         fixtureRoot, cases, "valid", TrustFailure::eRequestedFileNotApproved,
         L"sl.reflex.dll");
+
+    ProjectLoadResult projectPlugin = run(
+        fixtureRoot, cases / "project-plugin.bin",
+        cases / "project-plugin.sig", L"sl.fsr.dll", trust);
+    check(
+        static_cast<bool>(projectPlugin),
+        "manifest-authorized project plugin authenticates");
+
+    ProjectLoadResult projectVendor = run(
+        fixtureRoot, cases / "project-vendor.bin",
+        cases / "project-vendor.sig",
+        L"amd_fidelityfx_framegeneration_dx12.dll", trust);
+    check(
+        static_cast<bool>(projectVendor),
+        "manifest-authorized frame-generation provider authenticates without vendor Authenticode");
+
+    ProjectLoadResult projectUpscaler = run(
+        fixtureRoot, cases / "project-vendor.bin",
+        cases / "project-vendor.sig",
+        L"amd_fidelityfx_upscaler_dx12.dll", trust);
+    check(
+        static_cast<bool>(projectUpscaler),
+        "manifest-authorized upscaler provider authenticates without vendor Authenticode");
+
+    ProjectLoadResult amdModules = run(
+        fixtureRoot, cases / "amd-modules.bin",
+        cases / "amd-modules.sig",
+        L"amd_fidelityfx_loader_dx12.dll", trust);
+    check(
+        static_cast<bool>(amdModules),
+        "pinned signed AMD FidelityFX modules authenticate");
 
     ProjectLoadResult incomplete = run(
         fixtureRoot, validManifest, cases / "does-not-exist.sig",

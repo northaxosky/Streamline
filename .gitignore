@@ -1,5 +1,7 @@
 _project/
 _artifacts/
+_ffx/
+_ffxgen/
 _sdk/
 _public/
 docs/pages/*

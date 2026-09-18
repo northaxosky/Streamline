@@ -1,0 +1,31 @@
+{
+    "id": 1006,
+    "priority": 100,
+    "name": "sl.fsr_g",
+    "namespace": "fsr_g",
+    "required_plugins": ["sl.common"],
+    "exclusive_hooks": [],
+    "incompatible_plugins": [],
+    "runtime_incompatible_plugins": ["sl.dlss_g"],
+    "rhi": ["d3d12"],
+    "hooks": [
+        {
+            "class": "IDXGIFactory",
+            "target": "CreateSwapChain",
+            "replacement": "slHookCreateSwapChain",
+            "base": "before"
+        },
+        {
+            "class": "IDXGIFactory",
+            "target": "CreateSwapChainForHwnd",
+            "replacement": "slHookCreateSwapChainForHwnd",
+            "base": "before"
+        },
+        {
+            "class": "IDXGISwapChain",
+            "target": "Destroyed",
+            "replacement": "slHookSwapchainDestroyed",
+            "base": "before"
+        }
+    ]
+}

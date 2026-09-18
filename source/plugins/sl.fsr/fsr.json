@@ -1,0 +1,11 @@
+{
+    "id": 1005,
+    "priority": 100,
+    "name": "sl.fsr",
+    "namespace": "fsr",
+    "required_plugins": ["sl.common"],
+    "exclusive_hooks": [],
+    "incompatible_plugins": [],
+    "rhi": ["d3d12"],
+    "hooks": []
+}

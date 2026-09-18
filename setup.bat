@@ -56,4 +56,6 @@ IF "%cfg%"=="" (
 
 echo Creating project files for %cfg%
 call .\tools\packman\packman.cmd pull -p %packman_platform% project.xml
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\prepare-fidelityfx-framegeneration.ps1
+IF ERRORLEVEL 1 exit /b %ERRORLEVEL%
 call .\tools\premake5\premake5.exe %cfg% --file=.\premake.lua %premake_args%

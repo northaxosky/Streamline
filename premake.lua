@@ -537,7 +537,111 @@ project "sl.dlss"
 	vpaths { ["ngx"] = {"./source/core/ngx/**.h", "./source/core/ngx/**.cpp"}}
 		
 	removefiles {"./source/core/sl.extra/extra.cpp"}
-  	
+
+project "sl.fsr"
+	kind "SharedLib"
+	targetdir (out_dynamic_lib_dir())
+	objdir (out_obj_dir())
+	characterset ("MBCS")
+	dependson { "sl.common" }
+	pluginBasicSetup("fsr")
+
+	files {
+		"./source/plugins/sl.fsr/**.json",
+		"./source/plugins/sl.fsr/**.h",
+		"./source/plugins/sl.fsr/**.cpp",
+		"./source/plugins/sl.fsr.common/**.h",
+		"./source/plugins/sl.fsr.common/**.cpp"
+	}
+
+	vpaths { ["impl"] = {
+		"./source/plugins/sl.fsr/**.h",
+		"./source/plugins/sl.fsr/**.cpp",
+		"./source/plugins/sl.fsr.common/**.h",
+		"./source/plugins/sl.fsr.common/**.cpp"
+	} }
+
+	links { "d3d12.lib", "dxgi.lib" }
+	removefiles {"./source/core/sl.extra/extra.cpp"}
+
+project "sl.fsr_g"
+	kind "SharedLib"
+	targetdir (out_dynamic_lib_dir())
+	objdir (out_obj_dir())
+	characterset ("MBCS")
+	dependson { "sl.common" }
+	pluginBasicSetup("fsr_g")
+
+	files {
+		"./source/plugins/sl.fsr_g/**.json",
+		"./source/plugins/sl.fsr_g/**.h",
+		"./source/plugins/sl.fsr_g/**.cpp",
+		"./source/plugins/sl.fsr.common/**.h",
+		"./source/plugins/sl.fsr.common/**.cpp"
+	}
+
+	vpaths { ["impl"] = {
+		"./source/plugins/sl.fsr_g/**.h",
+		"./source/plugins/sl.fsr_g/**.cpp",
+		"./source/plugins/sl.fsr.common/**.h",
+		"./source/plugins/sl.fsr.common/**.cpp"
+	} }
+
+	links { "d3d12.lib", "dxgi.lib" }
+	removefiles {"./source/core/sl.extra/extra.cpp"}
+
+local function fidelityFxProviderProject(name, target, effectDefine, effectFiles)
+	project (name)
+		kind "SharedLib"
+		targetname (target)
+		targetdir (out_dynamic_lib_dir())
+		objdir (out_obj_dir())
+		characterset ("Unicode")
+
+		defines {
+			effectDefine,
+			"FFX_BACKEND_DX12=0",
+			"FFX_PROJECT_VENDOR_BUILD",
+			"_CRT_SECURE_NO_WARNINGS",
+			"_WINDOWS"
+		}
+
+		includedirs {
+			"./_ffxgen",
+			"./_artifacts/fidelityfx-sdk-build/sdk-1.1.4/sdk/libs/pix"
+		}
+
+		files {
+			"./_ffx/Kits/FidelityFX/api/internal/**.cpp",
+			"./_ffx/Kits/FidelityFX/backend/dx12/**.cpp"
+		}
+		files (effectFiles)
+
+		removeflags { "FatalWarnings" }
+		links { "d3d12.lib", "dxgi.lib", "dxguid.lib", "winmm.lib" }
+end
+
+fidelityFxProviderProject(
+	"cs_fidelityfx_upscaler_dx12",
+	"amd_fidelityfx_upscaler_dx12",
+	"FFX_UPSCALER",
+	{
+		"./_ffx/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp",
+		"./_ffx/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_shaderblobs.cpp",
+		"./_ffx/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp",
+		"./source/vendor/fidelityfx.upscaler/**.cpp"
+	})
+
+fidelityFxProviderProject(
+	"cs_fidelityfx_framegeneration_dx12",
+	"amd_fidelityfx_framegeneration_dx12",
+	"FFX_FRAMEGENERATION",
+	{
+		"./_ffx/Kits/FidelityFX/framegeneration/fsr3/internal/**.cpp",
+		"./_ffx/Kits/FidelityFX/framegeneration/fsr3/dx12/**.cpp",
+		"./source/vendor/fidelityfx.framegeneration/**.cpp"
+	})
+
 
 project "sl.reflex"
 	kind "SharedLib"	

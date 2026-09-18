@@ -252,6 +252,12 @@ constexpr Feature kFeatureDirectSR = 1003;
 
 constexpr Feature kFeatureDLSS_NR = 1004;
 
+//! AMD FidelityFX Super Resolution
+constexpr Feature kFeatureFSR = 1005;
+
+//! AMD FidelityFX Frame Generation
+constexpr Feature kFeatureFSR_G = 1006;
+
 // ImGUI 
 constexpr Feature kFeatureImGUI = 9999;
 

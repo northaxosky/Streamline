@@ -144,6 +144,19 @@ IF "%copy_cfg%"=="Production" (
     copy %features_src%\development\nvngx_dlssg.dll %copy_dest% /Y
 )
 
+:: FidelityFX Super Resolution and Frame Generation
+copy %artifacts_src%\sl.fsr\%copy_cfg%_%arch_vs%\sl.fsr.dll %copy_dest% /Y
+copy %artifacts_src%\sl.fsr\%copy_cfg%_%arch_vs%\sl.fsr.pdb %sym_dest% /Y
+copy %artifacts_src%\sl.fsr_g\%copy_cfg%_%arch_vs%\sl.fsr_g.dll %copy_dest% /Y
+copy %artifacts_src%\sl.fsr_g\%copy_cfg%_%arch_vs%\sl.fsr_g.pdb %sym_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_upscaler_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_upscaler_dx12.dll %copy_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_upscaler_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_upscaler_dx12.pdb %sym_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_framegeneration_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_framegeneration_dx12.dll %copy_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_framegeneration_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_framegeneration_dx12.pdb %sym_dest% /Y
+copy %src%\external\fidelityfx-sdk\Kits\FidelityFX\signedbin\amd_fidelityfx_loader_dx12.dll %copy_dest% /Y
+copy %src%\external\fidelityfx-sdk\docs\license.md %copy_dest%\amd-fidelityfx-license.md /Y
+copy %src%\external\fidelityfx-sdk\3rdpartynotice.md %copy_dest%\amd-fidelityfx-third-party-notices.md /Y
+
 :: DLSS Ray Reconstruction
 copy %artifacts_src%\sl.dlss_d\%copy_cfg%_%arch_vs%\sl.dlss_d.dll %copy_dest% /Y
 copy %artifacts_src%\sl.dlss_d\%copy_cfg%_%arch_vs%\sl.dlss_d.pdb %sym_dest% /Y
@@ -252,6 +265,8 @@ copy %src%\include\sl_deepdvc.h         %dest%\include
 copy %src%\include\sl_dlss.h            %dest%\include
 copy %src%\include\sl_dlss_d.h          %dest%\include
 copy %src%\include\sl_dlss_g.h          %dest%\include
+copy %src%\include\sl_fsr.h             %dest%\include
+copy %src%\include\sl_fsr_g.h           %dest%\include
 copy %src%\include\sl_nis.h             %dest%\include
 copy %src%\include\sl_nvperf.h          %dest%\include
 copy %src%\include\sl_pcl.h             %dest%\include
@@ -402,6 +417,12 @@ IF "%include_source%"=="True" (
     xcopy %src%\source\plugins\sl.dlss     %dest%\source\plugins\sl.dlss     /S
     mkdir %dest%\source\plugins\sl.dlss_d
     xcopy %src%\source\plugins\sl.dlss_d   %dest%\source\plugins\sl.dlss_d   /S
+    mkdir %dest%\source\plugins\sl.fsr.common
+    xcopy %src%\source\plugins\sl.fsr.common %dest%\source\plugins\sl.fsr.common /S
+    mkdir %dest%\source\plugins\sl.fsr
+    xcopy %src%\source\plugins\sl.fsr %dest%\source\plugins\sl.fsr /S
+    mkdir %dest%\source\plugins\sl.fsr_g
+    xcopy %src%\source\plugins\sl.fsr_g %dest%\source\plugins\sl.fsr_g /S
     mkdir %dest%\source\plugins\sl.imgui
     xcopy %src%\source\plugins\sl.imgui    %dest%\source\plugins\sl.imgui    /S
     mkdir %dest%\source\plugins\sl.nis
@@ -426,6 +447,8 @@ IF "%include_source%"=="True" (
     mkdir %dest%\external\ngx-sdk\lib
     mkdir %dest%\external\ngx-sdk\lib\Windows_%arch_vs_ex%
     mkdir %dest%\external\nvapi
+    mkdir %dest%\external\fidelityfx-sdk
+    xcopy %src%\external\fidelityfx-sdk %dest%\external\fidelityfx-sdk /S
 
     xcopy %src%\external\json\include                          %dest%\external\json\include /S
     copy %src%\external\json\LICENSE.MIT                       %dest%\external\json

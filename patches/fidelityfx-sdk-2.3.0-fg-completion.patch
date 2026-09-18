@@ -1,0 +1,320 @@
+diff --git a/Kits/FidelityFX/api/include/ffx_api_types.h b/Kits/FidelityFX/api/include/ffx_api_types.h
+index 07c0da2..cca3995 100644
+--- a/Kits/FidelityFX/api/include/ffx_api_types.h
++++ b/Kits/FidelityFX/api/include/ffx_api_types.h
+@@ -136 +136,2 @@ enum FfxApiBackbufferTransferFunction
+-    FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SCRGB
++    FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SCRGB,
++    FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2
+diff --git a/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.cpp b/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.cpp
+index b5c4709..6f023b1 100644
+--- a/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.cpp
++++ b/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.cpp
+@@ -42 +42 @@ static FfxABIVersion gDefaultABIStatus = FfxABIVersion::FFX_ABI_INVALID;
+-class FrameInterpolationSwapChainDX12Stable : public TFrameInterpolationSwapChainDX12<IFrameInterpolationSwapChainDX12, FrameinterpolationPresentInfoExt, FfxFrameGenerationConfig, ffxCallbackDescFrameGenerationPresent, FFX_FRAME_INTERPOLATION_SWAP_CHAIN_MAX_BUFFER_COUNT_SDK2>
++class FrameInterpolationSwapChainDX12Stable : public TFrameInterpolationSwapChainDX12<IFrameInterpolationSwapChainDX12V2, FrameinterpolationPresentInfoExt, FfxFrameGenerationConfig, ffxCallbackDescFrameGenerationPresent, FFX_FRAME_INTERPOLATION_SWAP_CHAIN_MAX_BUFFER_COUNT_SDK2>
+@@ -417,0 +418,24 @@ FfxErrorCode ffxGetFrameinterpolationCommandlistDX12(FfxSwapchain gameSwapChain,
++FfxErrorCode ffxGetFrameinterpolationHostInputCompletionDX12(
++    FfxSwapchain gameSwapChain,
++    ID3D12Fence** outFence,
++    UINT64* outFenceValue)
++{
++    if (!outFence || !outFenceValue)
++    {
++        return FFX_ERROR_INVALID_POINTER;
++    }
++
++    *outFence = nullptr;
++    *outFenceValue = 0;
++    IDXGISwapChain4* swapChain = ffxGetDX12SwapchainPtr(gameSwapChain);
++    IFrameInterpolationSwapChainDX12V2* frameInterpolationSwapchain = nullptr;
++    if (!swapChain || FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&frameInterpolationSwapchain))))
++    {
++        return FFX_ERROR_INVALID_ARGUMENT;
++    }
++
++    const HRESULT result = frameInterpolationSwapchain->GetHostInputCompletion(outFence, outFenceValue);
++    frameInterpolationSwapchain->Release();
++    return SUCCEEDED(result) ? FFX_OK : FFX_ERROR_BACKEND_API_ERROR;
++}
++
+@@ -1399 +1423,8 @@ FfxApiPresentCallbackFunc GetPresentCallbackFunc<FfxPresentCallbackDescriptionSD
+-    static HMODULE dll = GetModuleHandleW(L"amd_fidelityfx_dx12.dll");
++    static HMODULE dll = [] {
++        HMODULE module = nullptr;
++        GetModuleHandleEx(
++            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
++            reinterpret_cast<LPCTSTR>(ffxFrameInterpolationUiComposition),
++            &module);
++        return module;
++    }();
+@@ -1418 +1449,8 @@ FfxApiPresentCallbackFunc GetPresentCallbackFunc<FfxPresentCallbackDescriptionSD
+-    static HMODULE dll = GetModuleHandleW(L"amd_fidelityfx_framegeneration_dx12.dll");
++    static HMODULE dll = [] {
++        HMODULE module = nullptr;
++        GetModuleHandleEx(
++            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
++            reinterpret_cast<LPCTSTR>(ffxFrameInterpolationUiComposition),
++            &module);
++        return module;
++    }();
+@@ -1781,0 +1820,31 @@ void TFrameInterpolationSwapChainDX12<ParentType, PresentType, ConfigType, Prese
++template<typename ParentType, typename PresentType, typename ConfigType, typename PresentCallbackType, size_t NumBuffers>
++HRESULT TFrameInterpolationSwapChainDX12<ParentType, PresentType, ConfigType, PresentCallbackType, NumBuffers>::GetHostInputCompletion(
++    ID3D12Fence** outFence,
++    UINT64* outFenceValue)
++{
++    if (!outFence || !outFenceValue)
++    {
++        return E_POINTER;
++    }
++
++    *outFence = nullptr;
++    *outFenceValue = 0;
++    EnterCriticalSection(&criticalSection);
++    ID3D12Fence* fence = presentInfo.presentFence;
++    const UINT64 fenceValue = framesSentForPresentation;
++    if (fence)
++    {
++        fence->AddRef();
++    }
++    LeaveCriticalSection(&criticalSection);
++
++    if (!fence)
++    {
++        return E_FAIL;
++    }
++
++    *outFence = fence;
++    *outFenceValue = fenceValue;
++    return S_OK;
++}
++
+@@ -2503 +2572 @@ HRESULT STDMETHODCALLTYPE TFrameInterpolationSwapChainDX12<ParentType, PresentTy
+-        backBufferTransferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
++        backBufferTransferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2;
+@@ -2609 +2678,2 @@ HRESULT STDMETHODCALLTYPE FrameInterpolationSwapChainDX12Stable::QueryInterface(
+-        IID_IFrameInterpolationSwapChainDX12
++        IID_IFrameInterpolationSwapChainDX12,
++        IID_IFrameInterpolationSwapChainDX12V2
+diff --git a/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.h b/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.h
+index f1ba7da..071e179 100644
+--- a/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.h
++++ b/Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.h
+@@ -184,0 +185,2 @@ static const GUID IID_IFrameInterpolationSwapChainDX12 = { 0x5f5fa2f5, 0x3bc5, 0
++// {0CC5825D-FE32-42D7-8163-F8DBB7A54FAE}
++static const GUID IID_IFrameInterpolationSwapChainDX12V2 = { 0x0cc5825d, 0xfe32, 0x42d7, {0x81, 0x63, 0xf8, 0xdb, 0xb7, 0xa5, 0x4f, 0xae} };
+@@ -254,0 +257,6 @@ protected:
++class DECLSPEC_UUID("0cc5825d-fe32-42d7-8163-f8dbb7a54fae") IFrameInterpolationSwapChainDX12V2 : public IFrameInterpolationSwapChainDX12
++{
++public:
++    virtual HRESULT GetHostInputCompletion(ID3D12Fence** outFence, UINT64* outFenceValue) = 0;
++};
++
+@@ -341,0 +350 @@ public:
++    HRESULT GetHostInputCompletion(ID3D12Fence** outFence, UINT64* outFenceValue);
+@@ -423,0 +433,5 @@ typedef TFrameInterpolationSwapChainDX12<FrameInterpolationSwapChainDX12, Framei
++
++FfxErrorCode ffxGetFrameinterpolationHostInputCompletionDX12(
++    FfxSwapchain gameSwapChain,
++    ID3D12Fence** outFence,
++    UINT64* outFenceValue);
+diff --git a/Kits/FidelityFX/framegeneration/fsr3/dx12/ffx_provider_fsr3framegenerationswapchain_dx12.cpp b/Kits/FidelityFX/framegeneration/fsr3/dx12/ffx_provider_fsr3framegenerationswapchain_dx12.cpp
+index 0cbdd90..09ff889 100644
+--- a/Kits/FidelityFX/framegeneration/fsr3/dx12/ffx_provider_fsr3framegenerationswapchain_dx12.cpp
++++ b/Kits/FidelityFX/framegeneration/fsr3/dx12/ffx_provider_fsr3framegenerationswapchain_dx12.cpp
+@@ -27,0 +28 @@
++#include "FrameInterpolationSwapchainDX12.h"
+@@ -259,0 +261,14 @@ ffxReturnCode_t ffxProvider_Fsr3FrameGenerationSwapChain::Query(ffxContext* cont
++    else if (auto descCompletion = ffx::DynamicCast<ffxQueryDescFrameGenerationSwapChainHostInputCompletionDX12V1>(header))
++    {
++        VERIFY(context, FFX_API_RETURN_ERROR_PARAMETER);
++        VERIFY(*context, FFX_API_RETURN_ERROR_PARAMETER);
++        VERIFY(descCompletion->pOutFence, FFX_API_RETURN_ERROR_PARAMETER);
++        VERIFY(descCompletion->pOutFenceValue, FFX_API_RETURN_ERROR_PARAMETER);
++
++        InternalFgScContext* internal_context = reinterpret_cast<InternalFgScContext*>(*context);
++        TRY2(ffxGetFrameinterpolationHostInputCompletionDX12(
++            ffxGetSwapchainDX12(internal_context->fiSwapChain),
++            reinterpret_cast<ID3D12Fence**>(descCompletion->pOutFence),
++            descCompletion->pOutFenceValue));
++        return FFX_API_RETURN_OK;
++    }
+diff --git a/Kits/FidelityFX/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_common.h b/Kits/FidelityFX/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_common.h
+index afa5c5c..01bb9c2 100644
+--- a/Kits/FidelityFX/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_common.h
++++ b/Kits/FidelityFX/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_common.h
+@@ -67,0 +68,5 @@ FfxFloat32x3 RawRGBToLinear(FfxFloat32x3 fRawRgb)
++    case 3:
++        fLinearRgb = ffxLinearFromGamma(
++            ffxMax(fRawRgb, FfxFloat32x3(0.0f, 0.0f, 0.0f)),
++            2.2f);
++        break;
+@@ -87,0 +93,3 @@ FfxFloat32 RawRGBToLuminance(FfxFloat32x3 fRawRgb)
++    case 3:
++        fLuminance = RGBToLuma(RawRGBToLinear(fRawRgb));
++        break;
+diff --git a/Kits/FidelityFX/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_prepare_luma.h b/Kits/FidelityFX/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_prepare_luma.h
+index 52ff3d4..1d4843b 100644
+--- a/Kits/FidelityFX/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_prepare_luma.h
++++ b/Kits/FidelityFX/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_prepare_luma.h
+@@ -89,0 +90,4 @@ void PrepareLuma(FfxInt32x2 iGlobalId, FfxInt32 iLocalIndex)
++            else if (backbufferTransferFunction == 3)
++            {
++                fY = LinearLdrToLuminance(inputColor);
++            }
+diff --git a/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h b/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h
+index 8bc71ca..dec55d1 100644
+--- a/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h
++++ b/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h
+@@ -133,0 +134,8 @@ struct ffxCreateContextDescFrameGenerationSwapChainVersionDX12
++
++#define FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_HOST_INPUT_COMPLETION_DX12_V1 FFX_API_MAKE_BACKEND_EFFECT_SUB_ID(FFX_API_BACKEND_ID_DX12, FFX_API_EFFECT_ID_FRAMEGENERATIONSWAPCHAIN, 0x0c)
++struct ffxQueryDescFrameGenerationSwapChainHostInputCompletionDX12V1
++{
++    ffxQueryDescHeader header;          ///< Description header for the host-input completion query.
++    void**             pOutFence;       ///< Receives an AddRef'd ID3D12Fence covering all host-input reads scheduled by the latest Present.
++    uint64_t*          pOutFenceValue;  ///< Receives the fence value scheduled by the latest Present.
++};
+diff --git a/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.hpp b/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.hpp
+index 0fe46f0..ac5568c 100644
+--- a/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.hpp
++++ b/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.hpp
+@@ -109,0 +110,7 @@ struct CreateContextDescFrameGenerationSwapChainVersionDX12 : public InitHelper<
++template<>
++struct struct_type<ffxQueryDescFrameGenerationSwapChainHostInputCompletionDX12V1> : std::integral_constant<uint64_t, FFX_API_QUERY_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_HOST_INPUT_COMPLETION_DX12_V1>
++{};
++
++struct QueryDescFrameGenerationSwapChainHostInputCompletionDX12V1 : public InitHelper<ffxQueryDescFrameGenerationSwapChainHostInputCompletionDX12V1>
++{};
++
+diff --git a/Kits/FidelityFX/upscalers/fsr3/include/ffx_fsr3upscaler.h b/Kits/FidelityFX/upscalers/fsr3/include/ffx_fsr3upscaler.h
+index eb4240d..16fe6e2 100644
+--- a/Kits/FidelityFX/upscalers/fsr3/include/ffx_fsr3upscaler.h
++++ b/Kits/FidelityFX/upscalers/fsr3/include/ffx_fsr3upscaler.h
+@@ -146 +146,4 @@ typedef enum FfxFsr3UpscalerDispatchFlags
+-    FFX_FSR3UPSCALER_DISPATCH_DRAW_DEBUG_VIEW = (1 << 0),  ///< A bit indicating that the interpolated output resource will contain debug views with relevant information.
++    FFX_FSR3UPSCALER_DISPATCH_DRAW_DEBUG_VIEW             = (1 << 0),  ///< A bit indicating that the interpolated output resource will contain debug views with relevant information.
++    FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_SRGB       = (1 << 1),  ///< Decode IEC sRGB input before processing and encode the output back to IEC sRGB.
++    FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_PQ         = (1 << 2),  ///< Decode PQ input before processing and encode the output back to PQ.
++    FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_GAMMA_2_2  = (1 << 3),  ///< Decode pure gamma 2.2 input before processing and encode the output back to gamma 2.2.
+diff --git a/Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_hlsl.h b/Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_hlsl.h
+index 6b5c585..cfa99de 100644
+--- a/Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_hlsl.h
++++ b/Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_hlsl.h
+@@ -76,0 +77 @@ cbuffer cbFSR3Upscaler FFX_DECLARE_CB(FSR3UPSCALER_BIND_CB_FSR3UPSCALER)
++    FfxUInt32     uInputColorTransferFunction;
+@@ -181,0 +183,39 @@ FfxFloat32 AccumulationAddedPerFrame()
++FfxUInt32 InputColorTransferFunction()
++{
++    return uInputColorTransferFunction;
++}
++
++FfxFloat32x3 DecodeInputColor(FfxFloat32x3 color)
++{
++    switch (InputColorTransferFunction())
++    {
++    case 1:
++        return ffxLinearFromSrgb(color);
++    case 2:
++        return ffxLinearFromPQ(color);
++    case 3:
++        return ffxLinearFromGamma(
++            ffxMax(color, FfxFloat32x3(0.0f, 0.0f, 0.0f)),
++            2.2f);
++    default:
++        return color;
++    }
++}
++
++FfxFloat32x3 EncodeOutputColor(FfxFloat32x3 color)
++{
++    switch (InputColorTransferFunction())
++    {
++    case 1:
++        return ffxSrgbFromLinear(color);
++    case 2:
++        return ffxPQFromLinear(color);
++    case 3:
++        return ffxGammaFromLinear(
++            ffxMax(color, FfxFloat32x3(0.0f, 0.0f, 0.0f)),
++            1.0f / 2.2f);
++    default:
++        return color;
++    }
++}
++
+@@ -423 +461 @@ FfxFloat32x3 LoadInputColor(FfxUInt32x2 iPxPos)
+-    return r_input_color_jittered[iPxPos].rgb;
++    return DecodeInputColor(r_input_color_jittered[iPxPos].rgb);
+@@ -428 +466 @@ FfxFloat32x3 SampleInputColor(FfxFloat32x2 fUV)
+-    return r_input_color_jittered.SampleLevel(s_LinearClamp, fUV, 0).rgb;
++    return DecodeInputColor(r_input_color_jittered.SampleLevel(s_LinearClamp, fUV, 0).rgb);
+@@ -519 +557 @@ void StoreUpscaledOutput(FfxUInt32x2 iPxPos, FfxFloat32x3 fColor)
+-    rw_upscaled_output[iPxPos] = FfxFloat32x4(fColor, 1.f);
++    rw_upscaled_output[iPxPos] = FfxFloat32x4(EncodeOutputColor(fColor), 1.f);
+diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
+index 287e09b..af71ab1 100644
+--- a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
++++ b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
+@@ -46,3 +46,3 @@
+-#if !defined(_GAMING_XBOX)
++#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
+ #include "../../../amdinternal/api/internal/git_hash_branch.h"
+ #endif // !defined(_GAMING_XBOX)
+@@ -598 +598 @@ static FfxErrorCode fsr3UpscalerCreate(FfxFsr3UpscalerContext_Private* context,
+-#ifndef _GAMING_XBOX
++#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
+@@ -687 +687 @@ static FfxErrorCode fsr3UpscalerRelease(FfxFsr3UpscalerContext_Private* context)
+-#ifndef _GAMING_XBOX
++#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
+@@ -1041,0 +1042,5 @@ static FfxErrorCode fsr3upscalerDispatch(FfxFsr3UpscalerContext_Private* context
++    context->constants.inputColorTransferFunction =
++        (params->flags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_GAMMA_2_2) ? 3u :
++        (params->flags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_PQ) ? 2u :
++        (params->flags & FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_SRGB) ? 1u :
++        0u;
+@@ -1195 +1200 @@ static FfxErrorCode fsr3upscalerDispatch(FfxFsr3UpscalerContext_Private* context
+-#ifndef _GAMING_XBOX
++#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
+diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h
+index a77d7f0..6d828fa 100644
+--- a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h
++++ b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h
+@@ -25 +25 @@
+-#ifndef _GAMING_XBOX
++#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
+@@ -83,0 +84 @@ typedef struct Fsr3UpscalerConstants {
++    uint32_t                    inputColorTransferFunction;
+@@ -124 +125 @@ typedef struct FfxFsr3UpscalerContext_Private {
+-#ifndef _GAMING_XBOX
++#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
+diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
+index df59908..ab6b2b7 100644
+--- a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
++++ b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
+@@ -392,0 +393,12 @@ ffxReturnCode_t ffxProvider_FSR3Upscale::Dispatch(ffxContext* context, const ffx
++        if (desc->flags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB)
++        {
++            dispatchParameters.flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_SRGB;
++        }
++        if (desc->flags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ)
++        {
++            dispatchParameters.flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_PQ;
++        }
++        if (desc->flags & FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2)
++        {
++            dispatchParameters.flags |= FFX_FSR3UPSCALER_DISPATCH_NON_LINEAR_COLOR_GAMMA_2_2;
++        }
+diff --git a/Kits/FidelityFX/upscalers/include/ffx_upscale.h b/Kits/FidelityFX/upscalers/include/ffx_upscale.h
+index 021ac23..c623e37 100644
+--- a/Kits/FidelityFX/upscalers/include/ffx_upscale.h
++++ b/Kits/FidelityFX/upscalers/include/ffx_upscale.h
+@@ -63,3 +63,4 @@ enum FfxApiDispatchFsrUpscaleFlags
+-    FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW       = (1 << 0),  ///< A bit indicating that the output resource will contain debug views with relevant information.
+-    FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB = (1 << 1),  ///< A bit indicating that the input color resource contains perceptual sRGB colors
+-    FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ   = (1 << 2),  ///< A bit indicating that the input color resource contains perceptual PQ colors
++    FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW             = (1 << 0),  ///< A bit indicating that the output resource will contain debug views with relevant information.
++    FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB       = (1 << 1),  ///< A bit indicating that the input color resource contains perceptual sRGB colors.
++    FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ         = (1 << 2),  ///< A bit indicating that the input color resource contains perceptual PQ colors.
++    FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2  = (1 << 3),  ///< A bit indicating that the input color resource contains pure gamma 2.2 colors.

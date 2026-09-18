@@ -39,6 +39,9 @@ enum class ProjectFileRole : uint8_t
     eProjectInterposer = 1,
     eProjectCommon = 2,
     eNvidiaModule = 3,
+    eProjectPlugin = 4,
+    eAmdModule = 5,
+    eProjectVendorModule = 6,
 };
 
 enum class TrustFailure : uint32_t
@@ -60,6 +63,7 @@ enum class TrustFailure : uint32_t
     eFileSizeMismatch,
     eFileHashMismatch,
     eNvidiaSignatureInvalid,
+    eAmdSignatureInvalid,
     eLoadFailed,
 };
 

@@ -320,6 +320,8 @@ inline const char* getFeatureAsStr(Feature f)
         SL_CASE_STR(kFeatureDirectSR);
         SL_CASE_STR(kFeatureLatewarp);
         SL_CASE_STR(kFeatureDLSS_NR);
+        SL_CASE_STR(kFeatureFSR);
+        SL_CASE_STR(kFeatureFSR_G);
         // Removed features
         case kFeatureNRD_INVALID: break;
     }
@@ -345,6 +347,8 @@ inline const char* getFeatureFilenameAsStrNoSL(Feature f)
         case kFeatureDirectSR: return "directsr";
         case kFeatureLatewarp: return "latewarp";
         case kFeatureDLSS_NR: return "dlss_nr";
+        case kFeatureFSR: return "fsr";
+        case kFeatureFSR_G: return "fsr_g";
         case kFeatureNRD_INVALID: break;
     }
     return "Unknown";

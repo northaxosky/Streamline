@@ -47,6 +47,24 @@ $knownRoles = @{
             "sl.reflex.dll"
         )
     }
+    ProjectPlugin    = @{
+        Value = 4
+        Names = @(
+            "sl.fsr.dll",
+            "sl.fsr_g.dll"
+        )
+    }
+    AmdModule        = @{
+        Value = 5
+        Names = @("amd_fidelityfx_loader_dx12.dll")
+    }
+    ProjectVendorModule = @{
+        Value = 6
+        Names = @(
+            "amd_fidelityfx_upscaler_dx12.dll",
+            "amd_fidelityfx_framegeneration_dx12.dll"
+        )
+    }
 }
 
 function Assert-ReleaseId([string]$Value) {
