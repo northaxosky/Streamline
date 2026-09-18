@@ -68,6 +68,17 @@ function Assert-OfficialFile([string]$Path, [string]$ExpectedHash) {
     }
 }
 
+function Assert-AmdSdkRevision {
+    $sdk = Join-Path $root "external\fidelityfx-sdk"
+    if (-not (Test-Path -LiteralPath $sdk -PathType Container)) {
+        throw "Pinned FidelityFX SDK submodule is missing."
+    }
+    $commit = (& git -C $sdk rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $commit -cne $config.AmdSdk.Commit) {
+        throw "FidelityFX SDK must be at pinned commit $($config.AmdSdk.Commit)."
+    }
+}
+
 function Get-InventoryEntries([string]$Directory, [string]$Pattern = "*") {
     return @(
         Get-ChildItem -LiteralPath $Directory -Filter $Pattern -File |
@@ -110,6 +121,7 @@ switch ($Mode) {
         if (-not (Test-Path -LiteralPath $upstream -PathType Container)) {
             Expand-Archive -LiteralPath $archive -DestinationPath $upstream
         }
+        Assert-AmdSdkRevision
 
         if (Test-Path -LiteralPath $CandidateDirectory) {
             throw "CandidateDirectory already exists: $CandidateDirectory"
@@ -126,7 +138,17 @@ switch ($Mode) {
             if ($file.ContainsKey("BuildProject")) {
                 $sourceDirectory = Join-Path $BuildRoot "$($file.BuildProject)\Production_x64"
                 Copy-Item -LiteralPath (Join-Path $sourceDirectory $file.Name) -Destination $destination
-                Copy-Item -LiteralPath (Join-Path $sourceDirectory "$($file.BuildProject).pdb") -Destination $symbols
+                $symbolName = if ($file.ContainsKey("SymbolName")) {
+                    $file.SymbolName
+                } else {
+                    "$($file.BuildProject).pdb"
+                }
+                Copy-Item -LiteralPath (Join-Path $sourceDirectory $symbolName) -Destination $symbols
+            }
+            elseif ($file.ContainsKey("SourcePath")) {
+                $source = Join-Path $root $file.SourcePath
+                Assert-OfficialFile $source $file.Sha256
+                Copy-Item -LiteralPath $source -Destination $destination
             }
             else {
                 $source = Join-Path $upstream $file.ArchivePath
@@ -136,7 +158,11 @@ switch ($Mode) {
             $specFiles += [ordered]@{ name = $file.Name; role = $file.Role }
         }
         foreach ($license in $config.Licenses) {
-            $source = Join-Path $upstream $license.ArchivePath
+            $source = if ($license.ContainsKey("SourcePath")) {
+                Join-Path $root $license.SourcePath
+            } else {
+                Join-Path $upstream $license.ArchivePath
+            }
             $destination = Join-Path $package $license.OutputPath
             New-Item -ItemType Directory -Force (Split-Path -Parent $destination) | Out-Null
             Copy-Item -LiteralPath $source -Destination $destination
@@ -160,8 +186,12 @@ switch ($Mode) {
                 [ordered]@{
                     name = $file.Name
                     role = $file.Role
-                    origin = if ($file.ContainsKey("BuildProject")) {
+                    origin = if ($file.Role -ceq "ProjectVendorModule") {
+                        "project-fork-amd-sdk-$($config.AmdSdk.Commit)"
+                    } elseif ($file.ContainsKey("BuildProject")) {
                         "rebuilt-source"
+                    } elseif ($file.ContainsKey("SourcePath")) {
+                        "official-amd-sdk-$($config.AmdSdk.Commit)"
                     } else {
                         "official-nvidia-$($config.Upstream.Version)"
                     }
@@ -187,6 +217,8 @@ switch ($Mode) {
                     Get-Sha256 (Join-Path $provenance "projectTrust.generated.h")
                 upstreamVersion = $config.Upstream.Version
                 upstreamArchiveSha256 = $config.Upstream.Sha256
+                amdSdkCommit = $config.AmdSdk.Commit
+                amdSdkPatchSha256 = Get-Sha256 (Join-Path $root $config.AmdSdk.Patch)
             }
             components = $components
             symbols = Get-InventoryEntries $symbols "*.pdb"
@@ -216,6 +248,9 @@ switch ($Mode) {
         if ($inventory.releaseId -cne $config.ReleaseId -or
             $inventory.releaseTag -cne $config.ReleaseTag -or
             $inventory.sourceCommit -cne $SourceCommit -or
+            $inventory.build.amdSdkCommit -cne $config.AmdSdk.Commit -or
+            $inventory.build.amdSdkPatchSha256 -cne
+                (Get-Sha256 (Join-Path $root $config.AmdSdk.Patch)) -or
             $inventory.build.publicConfigSha256 -cne (Get-Sha256 $configPath)) {
             throw "Candidate provenance does not match the trusted release configuration."
         }
@@ -234,10 +269,19 @@ switch ($Mode) {
             }
             if (-not $file.ContainsKey("BuildProject") -and
                 $record.sha256 -cne $file.Sha256) {
-                throw "Candidate NVIDIA component does not match its upstream pin: $($file.Name)"
+                throw "Candidate vendor component does not match its source pin: $($file.Name)"
             }
         }
-        $expectedSymbols = @("sl.common.pdb", "sl.interposer.pdb")
+        $expectedSymbols = @($config.Runtime |
+            Where-Object { $_.ContainsKey("BuildProject") } |
+            ForEach-Object {
+                if ($_.ContainsKey("SymbolName")) {
+                    $_.SymbolName
+                } else {
+                    "$($_.BuildProject).pdb"
+                }
+            } |
+            Sort-Object)
         $actualSymbols = @(Get-ChildItem -LiteralPath (
             Join-Path $CandidateDirectory "symbols") -Filter "*.pdb" -File |
             Select-Object -ExpandProperty Name | Sort-Object)

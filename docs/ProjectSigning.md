@@ -20,12 +20,30 @@ NVIDIA-only embedded-signature path. If either community file is present, any
 missing, malformed, unknown-key, wrong-release, invalid-signature, incomplete,
 or mismatched package fails closed.
 
-The project signature can authorize only:
+The project signature can authorize only these project-owned files:
 
 * `sl.interposer.dll` with role `ProjectInterposer`
 * `sl.common.dll` with role `ProjectCommon`
+* `sl.fsr.dll` and `sl.fsr_g.dll` with role `ProjectPlugin`
+* `amd_fidelityfx_upscaler_dx12.dll` and
+  `amd_fidelityfx_framegeneration_dx12.dll` with role
+  `ProjectVendorModule`
 
-Both entries are required. The `NvidiaModule` role accepts only the shipped
+The interposer and common entries are required. `ProjectPlugin` and
+`ProjectVendorModule` authorize only the exact basenames above and require the
+manifest size and SHA-256 digest to match. The AMD providers are project-built
+from the exact `AmdSdk.Commit` plus `AmdSdk.Patch` configured in
+`config/project-release.psd1`; the candidate inventory records the commit and
+patch digest so validation can reproduce their provenance.
+
+The `AmdModule` role accepts only the official
+`amd_fidelityfx_loader_dx12.dll`. It must match the configured source pin and
+manifest digest and pass Windows Authenticode validation against the pinned AMD
+signer. Project-built AMD providers use `ProjectVendorModule`; they are
+authenticated by the project manifest and recorded source provenance, not
+misrepresented as AMD-Authenticode binaries.
+
+The `NvidiaModule` role accepts only the shipped
 `nvlowlatencyvk`, `nvngx_deepdvc`, `nvngx_dlss`, `nvngx_dlssd`,
 `nvngx_dlssg`, `sl.deepdvc`, `sl.directsr`, `sl.dlss`, `sl.dlss_d`,
 `sl.dlss_g`, `sl.imgui`, `sl.nis`, `sl.nvperf`, `sl.pcl`, and `sl.reflex`
@@ -34,8 +52,8 @@ policy in addition to their signed manifest size and digest. Streamline plugins
 retain the nested Streamline-key check. NGX binaries, which do not carry that
 nested signature, must pass Windows' strong primary Authenticode policy and the
 pinned NVIDIA NGX signer public-key check while their exact bytes remain
-authorized by the project-signed manifest. There is no wildcard role, and any
-other `sl.*.dll` beside a community manifest is refused.
+authorized by the project-signed manifest. There is no wildcard role; every
+other DLL basename or role pairing beside a community manifest is refused.
 
 The verifier calls its physical resolver independently for every logical
 basename. A future game adapter should resolve each winner through its own
@@ -92,11 +110,15 @@ Each sorted entry is:
 | Field | Size |
 | --- | ---: |
 | Basename byte length | 2 |
-| Role (`1`, `2`, or `3`) | 1 |
+| Role (`1` through `6`) | 1 |
 | Reserved zero | 1 |
 | File size | 8 |
 | SHA-256 digest | 32 |
 | Lowercase ASCII DLL basename | variable |
+
+Role values are `1` `ProjectInterposer`, `2` `ProjectCommon`, `3`
+`NvidiaModule`, `4` `ProjectPlugin`, `5` `AmdModule`, and `6`
+`ProjectVendorModule`.
 
 Names must be strictly sorted and unique, lowercase, and contain no path
 separator, drive marker, `..`, absolute path, or case ambiguity. Unknown
@@ -122,7 +144,8 @@ selected logical winner reaches the expected authenticated backing file.
 ## Release automation
 
 `config/project-release.psd1` is the single public source for the release ID,
-key ID, public key, upstream archive, and exact NVIDIA binary pins.
+key ID, public key, upstream archive, exact vendor binary pins, AMD SDK commit,
+AMD source patch, runtime roles, and project build targets.
 `tools/project-release.ps1 -Mode GeneratePublicHeader` produces
 `_artifacts/project-release/include/projectTrust.generated.h` for SDK and
 consumer builds. `.github/workflows/project-release.yml` accepts only the exact
@@ -131,6 +154,12 @@ the candidate before the protected `streamline-release` environment uses the
 single base64-encoded PKCS#8 PEM secret `STREAMLINE_SIGNING_KEY`. The key exists
 only in a restricted temporary file during the signing step and is deleted
 before verification and publication.
+
+Candidate assembly and signing require an exact committed source tree. The
+commit recorded as `SourceCommit` in the candidate inventory must identify the
+source used for the build; validation rejects a different release
+configuration, AMD commit, AMD patch digest, runtime inventory, or signing
+specification.
 
 ## Security scope
 

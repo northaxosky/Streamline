@@ -47,6 +47,9 @@ find_path(STREAMLINE_PLUGIN_JSON_DIR sl.interposer.json HINTS
 find_path(STREAMLINE_SUPPORT_DLL_DIR nvngx_dlss.dll HINTS
     "${STREAMLINE_SDK_BIN}"
     NO_CACHE)
+find_path(STREAMLINE_AMD_SUPPORT_DLL_DIR amd_fidelityfx_loader_dx12.dll HINTS
+    "${STREAMLINE_SDK_BIN}"
+    NO_CACHE)
 find_library(STREAMLINE_INTERPOSER_LIB sl.interposer HINTS
     "${STREAMLINE_SDK_LIB}"
     NO_CACHE)
@@ -63,6 +66,8 @@ option(STREAMLINE_FEATURE_NVPERF    "Include NSight Perf SDK dll" OFF)
 option(STREAMLINE_FEATURE_REFLEX    "Include Reflex dll"          OFF)
 option(STREAMLINE_FEATURE_NIS       "Include NIS dll"             OFF)
 option(STREAMLINE_FEATURE_DLSS_FG   "Include DLSS-FG dll"         OFF)
+option(STREAMLINE_FEATURE_FSR_SR    "Include FSR-SR dll"          OFF)
+option(STREAMLINE_FEATURE_FSR_FG    "Include FSR-FG dll"          OFF)
 option(STREAMLINE_FEATURE_DLSS_RR   "Include DLSS-RR dll"   OFF)
 option(STREAMLINE_FEATURE_DEEPDVC   "Include DEEPDVC dll"   OFF)
 option(STREAMLINE_FEATURE_DIRECTSR  "Include DirectSR dll"  OFF)
@@ -99,6 +104,22 @@ endif()
 if (STREAMLINE_FEATURE_DLSS_FG)
     list (APPEND STREAMLINE_DLLS "${STREAMLINE_PLUGIN_DLL_DIR}sl.dlss_g.dll" "${STREAMLINE_SUPPORT_DLL_DIR}nvngx_dlssg.dll")
 endif()
+
+if (STREAMLINE_FEATURE_FSR_SR)
+    list (APPEND STREAMLINE_DLLS
+        "${STREAMLINE_PLUGIN_DLL_DIR}sl.fsr.dll"
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_loader_dx12.dll"
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_upscaler_dx12.dll")
+endif()
+
+if (STREAMLINE_FEATURE_FSR_FG)
+    list (APPEND STREAMLINE_DLLS
+        "${STREAMLINE_PLUGIN_DLL_DIR}sl.fsr_g.dll"
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_loader_dx12.dll"
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_framegeneration_dx12.dll")
+endif()
+
+list(REMOVE_DUPLICATES STREAMLINE_DLLS)
 
 if (STREAMLINE_FEATURE_DLSS_RR)
     list (APPEND STREAMLINE_DLLS "${STREAMLINE_PLUGIN_DLL_DIR}sl.dlss_d.dll" "${STREAMLINE_SUPPORT_DLL_DIR}nvngx_dlssd.dll")

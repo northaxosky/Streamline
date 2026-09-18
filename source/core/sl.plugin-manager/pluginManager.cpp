@@ -35,6 +35,7 @@
 #include "source/core/sl.ota/iota.h"
 #include "source/core/sl.param/parameters.h"
 #include "source/core/sl.plugin-manager/pluginManager.h"
+#include "source/core/sl.plugin-manager/runtimeExclusivity.h"
 #include "source/core/sl.security/secureLoadLibrary.h"
 #include "source/core/sl.interposer/versions.h"
 #include "source/core/sl.interposer/hook.h"
@@ -328,6 +329,7 @@ private:
         std::vector<std::string> requiredPlugins;
         std::vector<std::string> exclusiveHooks;
         std::vector<std::string> incompatiblePlugins;
+        std::vector<std::string> runtimeIncompatiblePlugins;
         FeatureContext context{};
     };
 
@@ -507,6 +509,25 @@ Result PluginManager::setFeatureEnabled(Feature feature, bool value)
     {
         SL_LOG_VERBOSE("Feature '%s' is already in the requested 'loaded' state", getFeatureAsStr(feature));
         return Result::eOk;
+    }
+    if (value)
+    {
+        for (const auto* plugin : m_plugins)
+        {
+            if (!plugin->context.enabled) continue;
+            if (plugin_manager::areRuntimeIncompatible(
+                    (*it).second->name,
+                    (*it).second->runtimeIncompatiblePlugins,
+                    plugin->name,
+                    plugin->runtimeIncompatiblePlugins))
+            {
+                SL_LOG_ERROR(
+                    "Feature '%s' cannot be enabled while runtime-exclusive feature '%s' is enabled",
+                    getFeatureAsStr(feature),
+                    plugin->name.c_str());
+                return Result::eErrorFeatureManagerInvalidState;
+            }
+        }
     }
     ctx.enabled = value;
     SL_LOG_INFO("Feature '%s' %s", getFeatureAsStr(feature), value ? "loaded" : "unloaded");
@@ -883,6 +904,7 @@ Result PluginManager::mapPlugins(std::vector<fs::path>& files)
                 extractItems("required_plugins", plugin->requiredPlugins);
                 extractItems("exclusive_hooks", plugin->exclusiveHooks);
                 extractItems("incompatible_plugins", plugin->incompatiblePlugins);
+                extractItems("runtime_incompatible_plugins", plugin->runtimeIncompatiblePlugins);
             }
 
             // We have loaded a newer version of a plugin that has already
@@ -1197,6 +1219,15 @@ Result PluginManager::loadPlugins()
         {
             SL_LOG_INFO("P%u - %s", plugin->priority, plugin->name.c_str());
             m_featurePluginsMap[plugin->id] = plugin;
+        }
+
+        // Runtime-exclusive plugins remain resident so the host can switch after
+        // quiescing and disabling the active owner. Preserve the established
+        // implementation as the initial owner when both FG plugins are present.
+        if (auto* fsrG = isPluginLoaded("sl.fsr_g"); fsrG && isPluginLoaded("sl.dlss_g"))
+        {
+            fsrG->context.enabled = false;
+            SL_LOG_INFO("Plugin 'sl.fsr_g' loaded inactive because 'sl.dlss_g' owns frame-generation hooks");
         }
     }
     return m_plugins.empty() ? Result::eErrorNoPlugins : Result::eOk;

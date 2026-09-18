@@ -223,12 +223,43 @@ bool isNgxModule(std::string_view basename)
     return basename.starts_with("nvngx_");
 }
 
+bool isProjectPlugin(std::string_view basename)
+{
+    constexpr std::array<std::string_view, 2> names
+    {
+        "sl.fsr.dll",
+        "sl.fsr_g.dll",
+    };
+    return std::find(names.begin(), names.end(), basename) != names.end();
+}
+
+bool isKnownAmdModule(std::string_view basename)
+{
+    constexpr std::array<std::string_view, 1> names
+    {
+        "amd_fidelityfx_loader_dx12.dll",
+    };
+    return std::find(names.begin(), names.end(), basename) != names.end();
+}
+
+bool isProjectVendorModule(std::string_view basename)
+{
+    constexpr std::array<std::string_view, 2> names
+    {
+        "amd_fidelityfx_upscaler_dx12.dll",
+        "amd_fidelityfx_framegeneration_dx12.dll",
+    };
+    return std::find(names.begin(), names.end(), basename) != names.end();
+}
+
 TrustFailure hashBuffer(
     const uint8_t* data,
     size_t size,
     std::array<uint8_t, 32>& digest);
 
-bool verifyPinnedNvidiaNgxSignature(const wchar_t* fullPath)
+bool verifyPinnedAuthenticodeSignature(
+    const wchar_t* fullPath,
+    const std::array<uint8_t, 32>& expectedPublicKeyHash)
 {
     WINTRUST_FILE_INFO fileData{};
     fileData.cbStruct = sizeof(fileData);
@@ -276,14 +307,7 @@ bool verifyPinnedNvidiaNgxSignature(const wchar_t* fullPath)
                 certificate->pCertInfo->SubjectPublicKeyInfo.PublicKey.pbData,
                 certificate->pCertInfo->SubjectPublicKeyInfo.PublicKey.cbData,
                 publicKeyHash) == TrustFailure::eOk;
-        constexpr std::array<uint8_t, 32> nvidiaNgxPublicKeyHash
-        {
-            0xd5, 0x5f, 0x28, 0xff, 0x6a, 0x2a, 0x66, 0xa1,
-            0x8c, 0x56, 0x6c, 0x9c, 0x70, 0xcd, 0xd0, 0x48,
-            0xed, 0xe1, 0xcd, 0x0e, 0xc2, 0xe6, 0x6e, 0x56,
-            0x9a, 0x2d, 0x47, 0xb6, 0x99, 0xe0, 0x04, 0xa0
-        };
-        valid = valid && publicKeyHash == nvidiaNgxPublicKeyHash;
+        valid = valid && publicKeyHash == expectedPublicKeyHash;
     }
     trustData.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(nullptr, &policy, &trustData);
@@ -297,9 +321,28 @@ bool verifyNvidiaModuleSignature(
     // NGX binaries carry NVIDIA's primary Authenticode signature but not the
     // nested Streamline plugin signature. Their exact bytes remain bound by
     // the project-signed manifest.
+    constexpr std::array<uint8_t, 32> nvidiaNgxPublicKeyHash
+    {
+        0xd5, 0x5f, 0x28, 0xff, 0x6a, 0x2a, 0x66, 0xa1,
+        0x8c, 0x56, 0x6c, 0x9c, 0x70, 0xcd, 0xd0, 0x48,
+        0xed, 0xe1, 0xcd, 0x0e, 0xc2, 0xe6, 0x6e, 0x56,
+        0x9a, 0x2d, 0x47, 0xb6, 0x99, 0xe0, 0x04, 0xa0
+    };
     return isNgxModule(basename) ?
-        verifyPinnedNvidiaNgxSignature(fullPath) :
+        verifyPinnedAuthenticodeSignature(fullPath, nvidiaNgxPublicKeyHash) :
         verifyEmbeddedSignature(fullPath);
+}
+
+bool verifyAmdModuleSignature(const wchar_t* fullPath)
+{
+    constexpr std::array<uint8_t, 32> amdFidelityFxPublicKeyHash
+    {
+        0x6e, 0xfe, 0x34, 0x2f, 0x82, 0x6f, 0x89, 0xcd,
+        0x78, 0x6b, 0x32, 0x1a, 0x37, 0xaf, 0xb6, 0xbd,
+        0xb6, 0x34, 0x92, 0xe8, 0xe9, 0x1f, 0x9c, 0x3d,
+        0xa6, 0xfe, 0x9d, 0x8f, 0x4a, 0x66, 0x9b, 0xd1
+    };
+    return verifyPinnedAuthenticodeSignature(fullPath, amdFidelityFxPublicKeyHash);
 }
 
 bool roleMatchesBasename(ProjectFileRole role, std::string_view basename)
@@ -312,6 +355,12 @@ bool roleMatchesBasename(ProjectFileRole role, std::string_view basename)
         return basename == "sl.common.dll";
     case ProjectFileRole::eNvidiaModule:
         return isKnownNvidiaModule(basename);
+    case ProjectFileRole::eProjectPlugin:
+        return isProjectPlugin(basename);
+    case ProjectFileRole::eAmdModule:
+        return isKnownAmdModule(basename);
+    case ProjectFileRole::eProjectVendorModule:
+        return isProjectVendorModule(basename);
     default:
         return false;
     }
@@ -836,6 +885,11 @@ ProjectLoadResult authenticateAndLoadProjectLibrary(const ProjectLoadOptions& op
         {
             return fail(TrustFailure::eNvidiaSignatureInvalid);
         }
+        if (entry.role == ProjectFileRole::eAmdModule &&
+            !verifyAmdModuleSignature(opened.identityPath.c_str()))
+        {
+            return fail(TrustFailure::eAmdSignatureInvalid);
+        }
         if (entry.basename == requested)
         {
             requestedEntry = &entry;
@@ -889,6 +943,7 @@ const char* getTrustFailureMessage(TrustFailure failure)
     case TrustFailure::eFileSizeMismatch: return "a manifest file size does not match";
     case TrustFailure::eFileHashMismatch: return "a manifest file hash does not match";
     case TrustFailure::eNvidiaSignatureInvalid: return "NVIDIA embedded signature verification failed";
+    case TrustFailure::eAmdSignatureInvalid: return "AMD Authenticode signature verification failed";
     case TrustFailure::eLoadFailed: return "authenticated DLL load failed";
     default: return "unknown trust failure";
     }

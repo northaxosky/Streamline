@@ -1,0 +1,3 @@
+[submodule "external/fidelityfx-sdk"]
+	path = external/fidelityfx-sdk
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git

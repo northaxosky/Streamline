@@ -11,6 +11,7 @@ $unmanifestedRoot = Join-Path $artifacts "unmanifested"
 $missingRoot = Join-Path $artifacts "missing"
 $tamperedSizeRoot = Join-Path $artifacts "tampered-size"
 $tamperedHashRoot = Join-Path $artifacts "tampered-hash"
+$unsignedAmdRoot = Join-Path $artifacts "unsigned-amd"
 $keyRoot = Join-Path $artifacts "keys"
 $qualificationRoot = Join-Path $root "_artifacts\runtime-qualification\develop-sdk"
 $signingTool = Join-Path $root "tools\project-signing.ps1"
@@ -37,7 +38,7 @@ $haveNvidiaFixture =
 Remove-Item -LiteralPath $artifacts -Recurse -Force -ErrorAction SilentlyContinue
 foreach ($directory in @(
     $fixtureRoot, $caseRoot, $unmanifestedRoot, $missingRoot,
-    $tamperedSizeRoot, $tamperedHashRoot, $keyRoot)) {
+    $tamperedSizeRoot, $tamperedHashRoot, $unsignedAmdRoot, $keyRoot)) {
     New-Item -ItemType Directory -Force $directory | Out-Null
 }
 
@@ -185,14 +186,72 @@ function Write-Case(
 
 $interposer = Join-Path $fixtureRoot "sl.interposer.dll"
 $common = Join-Path $fixtureRoot "sl.common.dll"
+$projectPlugin = Join-Path $fixtureRoot "sl.fsr.dll"
+$projectUpscaler = Join-Path $fixtureRoot "amd_fidelityfx_upscaler_dx12.dll"
+$projectFrameGeneration = Join-Path $fixtureRoot "amd_fidelityfx_framegeneration_dx12.dll"
 $unsignedNgx = Join-Path $fixtureRoot "nvngx_dlss.dll"
+Copy-Item $interposer $projectPlugin
+Copy-Item $interposer $projectUpscaler
+Copy-Item $interposer $projectFrameGeneration
 Copy-Item $interposer $unsignedNgx
+$amdRuntimeRoot = Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\signedbin"
+$amdLoader = Join-Path $fixtureRoot "amd_fidelityfx_loader_dx12.dll"
+Copy-Item (Join-Path $amdRuntimeRoot "amd_fidelityfx_loader_dx12.dll") $amdLoader
+Copy-Item $interposer (Join-Path $unsignedAmdRoot "sl.interposer.dll")
+Copy-Item $common (Join-Path $unsignedAmdRoot "sl.common.dll")
+Copy-Item $projectFrameGeneration (Join-Path $unsignedAmdRoot "amd_fidelityfx_loader_dx12.dll")
 $standard = @(
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )
 Write-Case "unsigned-ngx" @(
     New-Entry "nvngx_dlss.dll" 3 $unsignedNgx
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "project-plugin" @(
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.fsr.dll" 4 $projectPlugin
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "project-vendor" @(
+    New-Entry "amd_fidelityfx_framegeneration_dx12.dll" 6 $projectFrameGeneration
+    New-Entry "amd_fidelityfx_upscaler_dx12.dll" 6 $projectUpscaler
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "amd-modules" @(
+    New-Entry "amd_fidelityfx_loader_dx12.dll" 5 $amdLoader
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "unsigned-amd" @(
+    New-Entry "amd_fidelityfx_loader_dx12.dll" 5 (Join-Path $unsignedAmdRoot "amd_fidelityfx_loader_dx12.dll")
+    New-Entry "sl.common.dll" 2 (Join-Path $unsignedAmdRoot "sl.common.dll")
+    New-Entry "sl.interposer.dll" 1 (Join-Path $unsignedAmdRoot "sl.interposer.dll")
+)
+Write-Case "wrong-project-plugin-role" @(
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.fsr.dll" 3 $projectPlugin
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "wrong-project-vendor-role" @(
+    New-Entry "amd_fidelityfx_upscaler_dx12.dll" 5 $projectUpscaler
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "wrong-project-vendor-basename" @(
+    New-Entry "cs_fidelityfx_unknown_dx12.dll" 6 $projectFrameGeneration
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "wrong-amd-role" @(
+    New-Entry "amd_fidelityfx_loader_dx12.dll" 3 $amdLoader
+    New-Entry "sl.common.dll" 2 $common
+    New-Entry "sl.interposer.dll" 1 $interposer
+)
+Write-Case "wrong-amd-basename" @(
+    New-Entry "amd_fidelityfx_framegeneration_dx12.dll" 5 $projectFrameGeneration
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )
@@ -318,4 +377,47 @@ else {
 & $testExe @testArguments
 if ($LASTEXITCODE -ne 0) {
     throw "Project trust regression test failed."
+}
+
+$providerTestExe = Join-Path $artifacts "fsr-provider-version-regression.exe"
+& $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX `
+    "/I$root" `
+    (Join-Path $PSScriptRoot "fsr-provider-version-regression.cpp") `
+    (Join-Path $root "source\plugins\sl.fsr.common\providerVersion.cpp") `
+    "/Fo:$artifacts\\" "/Fe:$providerTestExe"
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to build FSR provider version regression test."
+}
+& $providerTestExe
+if ($LASTEXITCODE -ne 0) {
+    throw "FSR provider version regression test failed."
+}
+
+$exclusivityTestExe = Join-Path $artifacts "plugin-runtime-exclusivity-regression.exe"
+& $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX `
+    "/I$root" `
+    (Join-Path $PSScriptRoot "plugin-runtime-exclusivity-regression.cpp") `
+    "/Fo:$artifacts\\" "/Fe:$exclusivityTestExe"
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to build plugin runtime exclusivity regression test."
+}
+& $exclusivityTestExe
+if ($LASTEXITCODE -ne 0) {
+    throw "Plugin runtime exclusivity regression test failed."
+}
+
+$completionTestExe = Join-Path $artifacts "fsr-completion-contract-regression.exe"
+& $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX /DNOMINMAX `
+    "/I$root" `
+    (Join-Path $PSScriptRoot "fsr-completion-contract-regression.cpp") `
+    "/Fo:$artifacts\\" "/Fe:$completionTestExe"
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to build FSR completion contract regression test."
+}
+& $completionTestExe `
+    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\framegeneration\fsr3\dx12\FrameInterpolationSwapchainDX12.cpp") `
+    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\framegeneration\fsr3\dx12\ffx_provider_fsr3framegenerationswapchain_dx12.cpp") `
+    (Join-Path $root "source\plugins\sl.fsr_g\fsrGEntry.cpp")
+if ($LASTEXITCODE -ne 0) {
+    throw "FSR completion contract regression test failed."
 }
