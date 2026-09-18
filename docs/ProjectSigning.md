@@ -166,6 +166,10 @@ source used for the build; validation rejects a different release
 configuration, AMD commit, AMD patch digest, runtime inventory, or signing
 specification.
 
+After signing, `project-release-verifier <bin-directory> --initialize` also
+exercises real Streamline plugin loading and FSR metadata registration. The default
+invocation authenticates files only; neither mode proves in-game rendering.
+
 ## Security scope
 
 This provides package authenticity and tamper resistance only while the trusted

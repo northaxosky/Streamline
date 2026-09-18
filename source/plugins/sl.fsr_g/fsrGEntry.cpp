@@ -52,6 +52,7 @@
 #include "external/fidelityfx-sdk/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h"
 #include "external/json/include/nlohmann/json.hpp"
 #include "_artifacts/json/fsr_g_json.h"
+#include "_artifacts/gitVersion.h"
 
 using json = nlohmann::json;
 
@@ -1145,6 +1146,7 @@ void updateEmbeddedJSON(json& config)
     param::getPointerParam(api::getContext()->parameters, param::common::kPFunUpdateCommonEmbeddedJSONConfig, &update);
     if (!update) return;
     common::PluginInfo info{};
+    info.SHA = GIT_LAST_COMMIT_SHORT;
     info.minOS = Version(10, 0, 0);
     info.requiredTags = {
         { kBufferTypeDepth, ResourceLifecycle::eValidUntilPresent },
