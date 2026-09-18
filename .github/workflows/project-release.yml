@@ -219,7 +219,7 @@ jobs:
         shell: pwsh
         run: |
           & _artifacts/project-release/verifier/project-release-verifier.exe `
-            "$env:CANDIDATE/package/bin/x64"
+            "$env:CANDIDATE/package/bin/x64" --initialize
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $out = "_artifacts/project-release/output"

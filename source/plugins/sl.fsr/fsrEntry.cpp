@@ -47,6 +47,7 @@
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/include/ffx_upscale.h"
 #include "external/json/include/nlohmann/json.hpp"
 #include "_artifacts/json/fsr_json.h"
+#include "_artifacts/gitVersion.h"
 
 using json = nlohmann::json;
 
@@ -719,6 +720,7 @@ void updateEmbeddedJSON(json& config)
     param::getPointerParam(api::getContext()->parameters, param::common::kPFunUpdateCommonEmbeddedJSONConfig, &update);
     if (!update) return;
     common::PluginInfo info{};
+    info.SHA = GIT_LAST_COMMIT_SHORT;
     info.minOS = Version(10, 0, 0);
     info.requiredTags = {
         { kBufferTypeScalingInputColor, ResourceLifecycle::eValidUntilEvaluate },
