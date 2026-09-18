@@ -38,6 +38,7 @@
 #include "source/core/sl.param/parameters.h"
 #include "source/core/sl.plugin/plugin.h"
 #include "source/plugins/sl.common/commonInterface.h"
+#include "source/plugins/sl.fsr.common/colorConversion.h"
 #include "source/plugins/sl.fsr.common/ffxRuntime.h"
 #include "source/plugins/sl.fsr/versions.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/include/ffx_upscale.h"
@@ -123,9 +124,7 @@ ID3D12GraphicsCommandList* getNativeCommandList(
 
 uint32_t getCreateFlags(const FSROptions& options, const Constants& constants, const FfxApiDimensions2D& renderSize, const FfxApiDimensions2D& motionSize)
 {
-    uint32_t flags{};
-    if (options.colorSpace == FSRColorSpace::ePQ) flags |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
-    if (options.colorSpace != FSRColorSpace::eLinear) flags |= FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
+    uint32_t flags = fsr::getUpscaleColorCreateFlags(options.colorSpace);
     if (options.useAutoExposure == Boolean::eTrue) flags |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
     if (options.dynamicResolutionEnabled == Boolean::eTrue) flags |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
     if (constants.depthInverted == Boolean::eTrue) flags |= FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
@@ -274,9 +273,7 @@ Result fsrEvaluate(chi::CommandList commandList, const common::EventData& event,
     dispatch.cameraFar = constants->cameraFar;
     dispatch.cameraFovAngleVertical = constants->cameraFOV;
     dispatch.viewSpaceToMetersFactor = options->viewSpaceToMetersFactor;
-    if (options->colorSpace == FSRColorSpace::eSRGB) dispatch.flags |= FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB;
-    if (options->colorSpace == FSRColorSpace::ePQ) dispatch.flags |= FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ;
-    if (options->colorSpace == FSRColorSpace::eGamma22) dispatch.flags |= FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2;
+    dispatch.flags = fsr::getUpscaleColorDispatchFlags(options->colorSpace);
 
     const auto result = ctx.runtime.dispatch(&viewport.context, &dispatch.header);
     if (result != FFX_API_RETURN_OK)

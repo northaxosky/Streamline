@@ -67,29 +67,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Present result regression test failed."
 }
 
-$colorTest = Join-Path $artifacts "fsr-color-contract-regression.exe"
-& $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX `
-    /I $root `
-    (Join-Path $PSScriptRoot "fsr-color-contract-regression.cpp") `
-    "/Fo:$artifacts\fsr-color-contract-regression.obj" `
-    "/Fe:$colorTest"
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to build fsr-color-contract-regression.cpp."
-}
-
-& $colorTest `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\upscalers\fsr3\internal\ffx_provider_fsr3upscale.cpp") `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\upscalers\fsr3\include\gpu\fsr3upscaler\ffx_fsr3upscaler_callbacks_hlsl.h") `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\api\internal\gpu\ffx_core_gpu_common.h") `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\framegeneration\fsr3\include\gpu\frameinterpolation\ffx_frameinterpolation_common.h") `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\framegeneration\fsr3\include\gpu\opticalflow\ffx_opticalflow_prepare_luma.h") `
-    (Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\framegeneration\fsr3\dx12\FrameInterpolationSwapchainDX12.cpp") `
-    (Join-Path $root "source\plugins\sl.fsr\fsrEntry.cpp") `
-    (Join-Path $root "source\plugins\sl.fsr_g\fsrGEntry.cpp")
-if ($LASTEXITCODE -ne 0) {
-    throw "FSR color contract regression test failed."
-}
-
 & (Join-Path $PSScriptRoot "run-project-trust-regressions.ps1")
 if ($LASTEXITCODE -ne 0) {
     throw "Project trust regressions failed."

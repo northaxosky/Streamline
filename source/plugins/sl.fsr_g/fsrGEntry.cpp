@@ -38,6 +38,7 @@
 #include "source/core/sl.param/parameters.h"
 #include "source/core/sl.plugin/plugin.h"
 #include "source/plugins/sl.common/commonInterface.h"
+#include "source/plugins/sl.fsr.common/colorConversion.h"
 #include "source/plugins/sl.fsr.common/ffxRuntime.h"
 #include "source/plugins/sl.fsr_g/versions.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h"
@@ -124,17 +125,6 @@ ID3D12GraphicsCommandList* getNativeCommandList(
         return native.Get();
     }
     return static_cast<ID3D12GraphicsCommandList*>(commandList);
-}
-
-FfxApiBackbufferTransferFunction getTransferFunction(FSRColorSpace colorSpace)
-{
-    switch (colorSpace)
-    {
-        case FSRColorSpace::eLinear: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SCRGB;
-        case FSRColorSpace::ePQ: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_PQ;
-        case FSRColorSpace::eGamma22: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2;
-        default: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
-    }
 }
 
 uint32_t getCreateFlags(const Constants& constants, FfxApiDimensions2D renderSize, FfxApiDimensions2D motionSize)
@@ -242,7 +232,8 @@ ffxReturnCode_t frameGenerationCallback(ffxDispatchDescFrameGeneration* desc, vo
 {
     auto* viewport = static_cast<fsr_g::Viewport*>(user);
     if (!viewport || !viewport->context) return FFX_API_RETURN_ERROR_PARAMETER;
-    desc->backbufferTransferFunction = getTransferFunction(viewport->options.colorSpace);
+    desc->backbufferTransferFunction =
+        fsr::getFrameGenerationTransferFunction(viewport->options.colorSpace);
     return fsr_g::getContext()->runtime.dispatch(&viewport->context, &desc->header);
 }
 

@@ -20,13 +20,14 @@ $test = Join-Path $artifacts "fsr-provider-runtime-regression.exe"
 & $compiler.Source /nologo /std:c++20 /EHsc /W4 /WX /DNOMINMAX `
     "/I$root" `
     (Join-Path $PSScriptRoot "fsr-provider-runtime-regression.cpp") `
-    d3d12.lib dxgi.lib user32.lib `
+    d3d12.lib d3dcompiler.lib dxgi.lib user32.lib `
     "/Fo:$artifacts\\" "/Fe:$test"
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to build FidelityFX provider runtime regression test."
 }
 
-& $test $upscaler $frameGeneration $loader
+& $test $upscaler $frameGeneration $loader `
+    (Join-Path $PSScriptRoot "fsr-color-transfer-regression.hlsl")
 if ($LASTEXITCODE -ne 0) {
     throw "FidelityFX provider runtime regression test failed."
 }
