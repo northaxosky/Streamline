@@ -149,11 +149,12 @@ copy %artifacts_src%\sl.fsr\%copy_cfg%_%arch_vs%\sl.fsr.dll %copy_dest% /Y
 copy %artifacts_src%\sl.fsr\%copy_cfg%_%arch_vs%\sl.fsr.pdb %sym_dest% /Y
 copy %artifacts_src%\sl.fsr_g\%copy_cfg%_%arch_vs%\sl.fsr_g.dll %copy_dest% /Y
 copy %artifacts_src%\sl.fsr_g\%copy_cfg%_%arch_vs%\sl.fsr_g.pdb %sym_dest% /Y
-copy %artifacts_src%\cs_fidelityfx_upscaler_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_upscaler_dx12.dll %copy_dest% /Y
-copy %artifacts_src%\cs_fidelityfx_upscaler_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_upscaler_dx12.pdb %sym_dest% /Y
-copy %artifacts_src%\cs_fidelityfx_framegeneration_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_framegeneration_dx12.dll %copy_dest% /Y
-copy %artifacts_src%\cs_fidelityfx_framegeneration_dx12\%copy_cfg%_%arch_vs%\amd_fidelityfx_framegeneration_dx12.pdb %sym_dest% /Y
-copy %src%\external\fidelityfx-sdk\Kits\FidelityFX\signedbin\amd_fidelityfx_loader_dx12.dll %copy_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_upscaler_dx12\%copy_cfg%_%arch_vs%\cs_fidelityfx_upscaler_dx12.dll %copy_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_upscaler_dx12\%copy_cfg%_%arch_vs%\cs_fidelityfx_upscaler_dx12.pdb %sym_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_framegeneration_dx12\%copy_cfg%_%arch_vs%\cs_fidelityfx_framegeneration_dx12.dll %copy_dest% /Y
+copy %artifacts_src%\cs_fidelityfx_framegeneration_dx12\%copy_cfg%_%arch_vs%\cs_fidelityfx_framegeneration_dx12.pdb %sym_dest% /Y
+copy %src%\external\fidelityfx-sdk\Kits\FidelityFX\signedbin\amd_fidelityfx_upscaler_dx12.dll %copy_dest% /Y
+copy %src%\external\fidelityfx-sdk\Kits\FidelityFX\signedbin\amd_fidelityfx_framegeneration_dx12.dll %copy_dest% /Y
 copy %src%\external\fidelityfx-sdk\docs\license.md %copy_dest%\amd-fidelityfx-license.md /Y
 copy %src%\external\fidelityfx-sdk\3rdpartynotice.md %copy_dest%\amd-fidelityfx-third-party-notices.md /Y
 

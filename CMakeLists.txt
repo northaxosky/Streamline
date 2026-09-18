@@ -47,7 +47,7 @@ find_path(STREAMLINE_PLUGIN_JSON_DIR sl.interposer.json HINTS
 find_path(STREAMLINE_SUPPORT_DLL_DIR nvngx_dlss.dll HINTS
     "${STREAMLINE_SDK_BIN}"
     NO_CACHE)
-find_path(STREAMLINE_AMD_SUPPORT_DLL_DIR amd_fidelityfx_loader_dx12.dll HINTS
+find_path(STREAMLINE_AMD_SUPPORT_DLL_DIR amd_fidelityfx_upscaler_dx12.dll HINTS
     "${STREAMLINE_SDK_BIN}"
     NO_CACHE)
 find_library(STREAMLINE_INTERPOSER_LIB sl.interposer HINTS
@@ -108,15 +108,15 @@ endif()
 if (STREAMLINE_FEATURE_FSR_SR)
     list (APPEND STREAMLINE_DLLS
         "${STREAMLINE_PLUGIN_DLL_DIR}sl.fsr.dll"
-        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_loader_dx12.dll"
-        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_upscaler_dx12.dll")
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_upscaler_dx12.dll"
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}cs_fidelityfx_upscaler_dx12.dll")
 endif()
 
 if (STREAMLINE_FEATURE_FSR_FG)
     list (APPEND STREAMLINE_DLLS
         "${STREAMLINE_PLUGIN_DLL_DIR}sl.fsr_g.dll"
-        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_loader_dx12.dll"
-        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_framegeneration_dx12.dll")
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}amd_fidelityfx_framegeneration_dx12.dll"
+        "${STREAMLINE_AMD_SUPPORT_DLL_DIR}cs_fidelityfx_framegeneration_dx12.dll")
 endif()
 
 list(REMOVE_DUPLICATES STREAMLINE_DLLS)

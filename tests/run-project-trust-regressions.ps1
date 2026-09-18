@@ -182,19 +182,21 @@ function Write-Case(
 $interposer = Join-Path $fixtureRoot "sl.interposer.dll"
 $common = Join-Path $fixtureRoot "sl.common.dll"
 $projectPlugin = Join-Path $fixtureRoot "sl.fsr.dll"
-$projectUpscaler = Join-Path $fixtureRoot "amd_fidelityfx_upscaler_dx12.dll"
-$projectFrameGeneration = Join-Path $fixtureRoot "amd_fidelityfx_framegeneration_dx12.dll"
+$projectUpscaler = Join-Path $fixtureRoot "cs_fidelityfx_upscaler_dx12.dll"
+$projectFrameGeneration = Join-Path $fixtureRoot "cs_fidelityfx_framegeneration_dx12.dll"
 $unsignedNgx = Join-Path $fixtureRoot "nvngx_dlss.dll"
 Copy-Item $interposer $projectPlugin
 Copy-Item $interposer $projectUpscaler
 Copy-Item $interposer $projectFrameGeneration
 Copy-Item $interposer $unsignedNgx
 $amdRuntimeRoot = Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\signedbin"
-$amdLoader = Join-Path $fixtureRoot "amd_fidelityfx_loader_dx12.dll"
-Copy-Item (Join-Path $amdRuntimeRoot "amd_fidelityfx_loader_dx12.dll") $amdLoader
+$amdUpscaler = Join-Path $fixtureRoot "amd_fidelityfx_upscaler_dx12.dll"
+$amdFrameGeneration = Join-Path $fixtureRoot "amd_fidelityfx_framegeneration_dx12.dll"
+Copy-Item (Join-Path $amdRuntimeRoot "amd_fidelityfx_upscaler_dx12.dll") $amdUpscaler
+Copy-Item (Join-Path $amdRuntimeRoot "amd_fidelityfx_framegeneration_dx12.dll") $amdFrameGeneration
 Copy-Item $interposer (Join-Path $unsignedAmdRoot "sl.interposer.dll")
 Copy-Item $common (Join-Path $unsignedAmdRoot "sl.common.dll")
-Copy-Item $projectFrameGeneration (Join-Path $unsignedAmdRoot "amd_fidelityfx_loader_dx12.dll")
+Copy-Item $projectFrameGeneration (Join-Path $unsignedAmdRoot "amd_fidelityfx_upscaler_dx12.dll")
 $standard = @(
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
@@ -210,18 +212,19 @@ Write-Case "project-plugin" @(
     New-Entry "sl.interposer.dll" 1 $interposer
 )
 Write-Case "project-vendor" @(
-    New-Entry "amd_fidelityfx_framegeneration_dx12.dll" 6 $projectFrameGeneration
-    New-Entry "amd_fidelityfx_upscaler_dx12.dll" 6 $projectUpscaler
+    New-Entry "cs_fidelityfx_framegeneration_dx12.dll" 6 $projectFrameGeneration
+    New-Entry "cs_fidelityfx_upscaler_dx12.dll" 6 $projectUpscaler
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )
 Write-Case "amd-modules" @(
-    New-Entry "amd_fidelityfx_loader_dx12.dll" 5 $amdLoader
+    New-Entry "amd_fidelityfx_framegeneration_dx12.dll" 5 $amdFrameGeneration
+    New-Entry "amd_fidelityfx_upscaler_dx12.dll" 5 $amdUpscaler
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )
 Write-Case "unsigned-amd" @(
-    New-Entry "amd_fidelityfx_loader_dx12.dll" 5 (Join-Path $unsignedAmdRoot "amd_fidelityfx_loader_dx12.dll")
+    New-Entry "amd_fidelityfx_upscaler_dx12.dll" 5 (Join-Path $unsignedAmdRoot "amd_fidelityfx_upscaler_dx12.dll")
     New-Entry "sl.common.dll" 2 (Join-Path $unsignedAmdRoot "sl.common.dll")
     New-Entry "sl.interposer.dll" 1 (Join-Path $unsignedAmdRoot "sl.interposer.dll")
 )
@@ -231,7 +234,7 @@ Write-Case "wrong-project-plugin-role" @(
     New-Entry "sl.interposer.dll" 1 $interposer
 )
 Write-Case "wrong-project-vendor-role" @(
-    New-Entry "amd_fidelityfx_upscaler_dx12.dll" 5 $projectUpscaler
+    New-Entry "cs_fidelityfx_upscaler_dx12.dll" 5 $projectUpscaler
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )
@@ -241,12 +244,12 @@ Write-Case "wrong-project-vendor-basename" @(
     New-Entry "sl.interposer.dll" 1 $interposer
 )
 Write-Case "wrong-amd-role" @(
-    New-Entry "amd_fidelityfx_loader_dx12.dll" 3 $amdLoader
+    New-Entry "amd_fidelityfx_upscaler_dx12.dll" 3 $amdUpscaler
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )
 Write-Case "wrong-amd-basename" @(
-    New-Entry "amd_fidelityfx_framegeneration_dx12.dll" 5 $projectFrameGeneration
+    New-Entry "amd_fidelityfx_unknown_dx12.dll" 5 $projectFrameGeneration
     New-Entry "sl.common.dll" 2 $common
     New-Entry "sl.interposer.dll" 1 $interposer
 )

@@ -25,23 +25,28 @@ The project signature can authorize only these project-owned files:
 * `sl.interposer.dll` with role `ProjectInterposer`
 * `sl.common.dll` with role `ProjectCommon`
 * `sl.fsr.dll` and `sl.fsr_g.dll` with role `ProjectPlugin`
-* `amd_fidelityfx_upscaler_dx12.dll` and
-  `amd_fidelityfx_framegeneration_dx12.dll` with role
+* `cs_fidelityfx_upscaler_dx12.dll` and
+  `cs_fidelityfx_framegeneration_dx12.dll` with role
   `ProjectVendorModule`
 
 The interposer and common entries are required. `ProjectPlugin` and
 `ProjectVendorModule` authorize only the exact basenames above and require the
-manifest size and SHA-256 digest to match. The AMD providers are project-built
-from the exact `AmdSdk.Commit` plus `AmdSdk.Patch` configured in
+manifest size and SHA-256 digest to match. The project vendor providers are
+built from the exact `AmdSdk.Commit` plus `AmdSdk.Patch` configured in
 `config/project-release.psd1`; the candidate inventory records the commit and
 patch digest so validation can reproduce their provenance.
 
 The `AmdModule` role accepts only the official
-`amd_fidelityfx_loader_dx12.dll`. It must match the configured source pin and
-manifest digest and pass Windows Authenticode validation against the pinned AMD
-signer. Project-built AMD providers use `ProjectVendorModule`; they are
-authenticated by the project manifest and recorded source provenance, not
-misrepresented as AMD-Authenticode binaries.
+`amd_fidelityfx_upscaler_dx12.dll` and
+`amd_fidelityfx_framegeneration_dx12.dll`. They must match the configured source
+pin and manifest digest and pass Windows Authenticode validation against the
+pinned AMD signer. The official effect modules retain their AMD filenames and
+signatures so FSR 4 algorithms remain intact. They export the public FFX API
+directly and do not import `amd_fidelityfx_loader_dx12.dll`, so the unused
+generic loader is not part of the project runtime closure. Project-built FSR 3
+providers use distinct `cs_fidelityfx_*` names and the
+`ProjectVendorModule` role; they are authenticated by the project manifest and
+recorded source provenance, not misrepresented as AMD-Authenticode binaries.
 
 The `NvidiaModule` role accepts only the shipped
 `nvlowlatencyvk`, `nvngx_deepdvc`, `nvngx_dlss`, `nvngx_dlssd`,

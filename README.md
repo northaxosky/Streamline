@@ -70,6 +70,9 @@ Once the project is built for a configuration, the built, unsigned DLLs may be f
 
 Obviously, `sl.dlss_g.dll` cannot be built from source and thus the prebuilt copy must be used.
 
+See the [FSR integration guide](docs/ProgrammingGuideFSR.md) for the project
+FSR 3/FSR 4 API, runtime layout, color, and frame-retirement contracts.
+
 Project-owned `Production` package signing is disabled by default. See
 [Project-owned Streamline package signing](docs/ProjectSigning.md) for the
 private trust component, strict detached manifest format, offline signing

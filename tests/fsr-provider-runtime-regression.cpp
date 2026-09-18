@@ -4,9 +4,11 @@
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_color.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/include/ffx_upscale.h"
 #include "source/plugins/sl.fsr.common/colorConversion.h"
+#include "source/plugins/sl.fsr.common/providerCapabilities.h"
 
 #include <d3d12.h>
 #include <d3dcompiler.h>
+#include <DirectXPackedVector.h>
 #include <windows.h>
 #include <wrl/client.h>
 
@@ -454,25 +456,65 @@ bool validatesColorContract(ID3D12Device* device, const wchar_t* shaderPath)
         return false;
     }
 
-    const uint32_t gammaDispatch =
-        sl::fsr::getUpscaleColorDispatchFlags(sl::FSRColorSpace::eGamma22);
-    const uint32_t srgbDispatch =
-        sl::fsr::getUpscaleColorDispatchFlags(sl::FSRColorSpace::eSRGB);
+    uint32_t gammaDispatch{};
+    uint32_t srgbDispatch{};
+    uint32_t gammaTransfer{};
+    const bool hasProjectGammaDispatch =
+        sl::fsr::getUpscaleColorDispatchFlags(
+            sl::FSRColorSpace::eGamma22,
+            true,
+            gammaDispatch);
+    const bool hasSrgbDispatch =
+        sl::fsr::getUpscaleColorDispatchFlags(
+            sl::FSRColorSpace::eSRGB,
+            false,
+            srgbDispatch);
+    const bool hasProjectGammaTransfer =
+        sl::fsr::getFrameGenerationTransferFunction(
+            sl::FSRColorSpace::eGamma22,
+            true,
+            gammaTransfer);
     const uint32_t gammaInternalDispatch =
         ffxFsr3UpscalerGetDispatchColorFlags(gammaDispatch);
     const uint32_t srgbInternalDispatch =
         ffxFsr3UpscalerGetDispatchColorFlags(srgbDispatch);
-    const bool mappingsValid =
+    const bool projectFsr3MappingsValid =
+        hasProjectGammaDispatch &&
+        hasSrgbDispatch &&
+        hasProjectGammaTransfer &&
         gammaDispatch == FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2 &&
         srgbDispatch == FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB &&
         sl::fsr::getUpscaleColorCreateFlags(sl::FSRColorSpace::eGamma22) ==
             FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE &&
-        sl::fsr::getFrameGenerationTransferFunction(sl::FSRColorSpace::eGamma22) ==
+        gammaTransfer ==
             FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2;
+    uint32_t officialUpscaleFlags{};
+    uint32_t officialFrameGenerationTransfer{};
+    const bool officialLinearMappingValid =
+        sl::fsr::getUpscaleColorDispatchFlags(
+            sl::FSRColorSpace::eLinear,
+            false,
+            officialUpscaleFlags) &&
+        officialUpscaleFlags == 0 &&
+        sl::fsr::getFrameGenerationTransferFunction(
+            sl::FSRColorSpace::eLinear,
+            false,
+            officialFrameGenerationTransfer) &&
+        officialFrameGenerationTransfer ==
+            FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SCRGB &&
+        !sl::fsr::getUpscaleColorDispatchFlags(
+            sl::FSRColorSpace::eGamma22,
+            false,
+            officialUpscaleFlags) &&
+        !sl::fsr::getFrameGenerationTransferFunction(
+            sl::FSRColorSpace::eGamma22,
+            false,
+            officialFrameGenerationTransfer);
 
     ColorResults gamma{};
     ColorResults srgb{};
-    if (!mappingsValid ||
+    if (!projectFsr3MappingsValid ||
+        !officialLinearMappingValid ||
         !runColorTransfer(
             device,
             rootSignature.Get(),
@@ -515,6 +557,527 @@ bool validatesColorContract(ID3D12Device* device, const wchar_t* shaderPath)
             << ", gamma negative=" << gamma[2][0]
             << ", srgb negative=" << srgb[2][0] << '\n';
     }
+    return valid;
+}
+
+bool validatesGamma22LinearAdapter(
+    ID3D12Device* device,
+    const wchar_t* shaderPath)
+{
+    // Exercise the shipped conversion HLSL, PSO, barriers, and fence lifetime
+    // independently of ML-provider support. This is not an FSR4/MLFG dispatch.
+    std::ifstream shaderStream(
+        shaderPath,
+        std::ios::binary | std::ios::ate);
+    if (!shaderStream) return false;
+    const auto shaderSize = shaderStream.tellg();
+    if (shaderSize <= 0) return false;
+    shaderStream.seekg(0);
+    std::vector<uint8_t> shader(static_cast<size_t>(shaderSize));
+    if (!shaderStream.read(
+            reinterpret_cast<char*>(shader.data()),
+            shaderSize))
+    {
+        return false;
+    }
+
+    D3D12_DESCRIPTOR_RANGE ranges[2]{};
+    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ranges[0].NumDescriptors = 1;
+    ranges[0].BaseShaderRegister = 0;
+    ranges[0].OffsetInDescriptorsFromTableStart = 0;
+    ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    ranges[1].NumDescriptors = 1;
+    ranges[1].BaseShaderRegister = 0;
+    ranges[1].OffsetInDescriptorsFromTableStart = 0;
+    D3D12_ROOT_PARAMETER parameters[3]{};
+    parameters[0].ParameterType =
+        D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[0].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[0].DescriptorTable.pDescriptorRanges = &ranges[0];
+    parameters[1].ParameterType =
+        D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[1].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[1].DescriptorTable.pDescriptorRanges = &ranges[1];
+    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    parameters[2].Descriptor.ShaderRegister = 0;
+    D3D12_ROOT_SIGNATURE_DESC rootDesc{};
+    rootDesc.NumParameters = static_cast<UINT>(std::size(parameters));
+    rootDesc.pParameters = parameters;
+    Microsoft::WRL::ComPtr<ID3DBlob> serializedRoot;
+    Microsoft::WRL::ComPtr<ID3DBlob> rootErrors;
+    if (FAILED(D3D12SerializeRootSignature(
+            &rootDesc,
+            D3D_ROOT_SIGNATURE_VERSION_1,
+            serializedRoot.GetAddressOf(),
+            rootErrors.GetAddressOf())))
+    {
+        return false;
+    }
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
+    if (FAILED(device->CreateRootSignature(
+            0,
+            serializedRoot->GetBufferPointer(),
+            serializedRoot->GetBufferSize(),
+            IID_PPV_ARGS(rootSignature.GetAddressOf()))))
+    {
+        return false;
+    }
+    D3D12_COMPUTE_PIPELINE_STATE_DESC pipelineDesc{};
+    pipelineDesc.pRootSignature = rootSignature.Get();
+    pipelineDesc.CS = { shader.data(), shader.size() };
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipeline;
+    if (FAILED(device->CreateComputePipelineState(
+            &pipelineDesc,
+            IID_PPV_ARGS(pipeline.GetAddressOf()))))
+    {
+        return false;
+    }
+
+    constexpr UINT width = 2;
+    constexpr UINT height = 2;
+    const std::array<std::array<uint8_t, 4>, width * height> sourcePixels{{
+        {{ 0, 64, 128, 0 }},
+        {{ 192, 255, 32, 85 }},
+        {{ 17, 111, 229, 170 }},
+        {{ 255, 1, 200, 255 }}
+    }};
+    const auto makeTextureDesc = [](DXGI_FORMAT format, bool allowUav)
+    {
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = width;
+        desc.Height = height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = format;
+        desc.SampleDesc.Count = 1;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = allowUav ?
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS :
+            D3D12_RESOURCE_FLAG_NONE;
+        return desc;
+    };
+    D3D12_HEAP_PROPERTIES defaultHeap{};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    const auto inputDesc =
+        makeTextureDesc(DXGI_FORMAT_R8G8B8A8_UNORM, false);
+    const auto linearDesc =
+        makeTextureDesc(DXGI_FORMAT_R16G16B16A16_FLOAT, true);
+    const auto outputDesc =
+        makeTextureDesc(DXGI_FORMAT_R8G8B8A8_UNORM, true);
+    Microsoft::WRL::ComPtr<ID3D12Resource> input;
+    Microsoft::WRL::ComPtr<ID3D12Resource> linear;
+    Microsoft::WRL::ComPtr<ID3D12Resource> output;
+    if (FAILED(device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &inputDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(input.GetAddressOf()))) ||
+        FAILED(device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &linearDesc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(linear.GetAddressOf()))) ||
+        FAILED(device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &outputDesc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(output.GetAddressOf()))))
+    {
+        return false;
+    }
+
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT linearFootprint{};
+    UINT rows{};
+    UINT64 rowBytes{};
+    UINT64 uploadBytes{};
+    device->GetCopyableFootprints(
+        &inputDesc,
+        0,
+        1,
+        0,
+        &footprint,
+        &rows,
+        &rowBytes,
+        &uploadBytes);
+    UINT linearRows{};
+    UINT64 linearRowBytes{};
+    UINT64 linearReadbackBytes{};
+    device->GetCopyableFootprints(
+        &linearDesc,
+        0,
+        1,
+        0,
+        &linearFootprint,
+        &linearRows,
+        &linearRowBytes,
+        &linearReadbackBytes);
+    D3D12_RESOURCE_DESC bufferDesc{};
+    bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufferDesc.Width = uploadBytes;
+    bufferDesc.Height = 1;
+    bufferDesc.DepthOrArraySize = 1;
+    bufferDesc.MipLevels = 1;
+    bufferDesc.SampleDesc.Count = 1;
+    bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    D3D12_HEAP_PROPERTIES uploadHeap{};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12_HEAP_PROPERTIES readbackHeap{};
+    readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
+    Microsoft::WRL::ComPtr<ID3D12Resource> upload;
+    Microsoft::WRL::ComPtr<ID3D12Resource> readback;
+    Microsoft::WRL::ComPtr<ID3D12Resource> linearReadback;
+    if (FAILED(device->CreateCommittedResource(
+            &uploadHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &bufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(upload.GetAddressOf()))) ||
+        FAILED(device->CreateCommittedResource(
+            &readbackHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &bufferDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(readback.GetAddressOf()))))
+    {
+        return false;
+    }
+    D3D12_RESOURCE_DESC linearReadbackDesc = bufferDesc;
+    linearReadbackDesc.Width = linearReadbackBytes;
+    if (FAILED(device->CreateCommittedResource(
+            &readbackHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &linearReadbackDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(linearReadback.GetAddressOf()))))
+    {
+        return false;
+    }
+    void* uploadData{};
+    D3D12_RANGE noRead{ 0, 0 };
+    if (FAILED(upload->Map(0, &noRead, &uploadData))) return false;
+    for (UINT row = 0; row < height; ++row)
+    {
+        std::memcpy(
+            static_cast<uint8_t*>(uploadData) +
+                footprint.Offset +
+                row * footprint.Footprint.RowPitch,
+            sourcePixels.data() + row * width,
+            width * sizeof(sourcePixels[0]));
+    }
+    D3D12_RANGE writtenUpload{ 0, uploadBytes };
+    upload->Unmap(0, &writtenUpload);
+
+    D3D12_RESOURCE_DESC constantsDesc = bufferDesc;
+    constantsDesc.Width =
+        2 * D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
+    Microsoft::WRL::ComPtr<ID3D12Resource> constants;
+    if (FAILED(device->CreateCommittedResource(
+            &uploadHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &constantsDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(constants.GetAddressOf()))))
+    {
+        return false;
+    }
+    struct ConversionConstants
+    {
+        uint32_t width;
+        uint32_t height;
+        uint32_t direction;
+        uint32_t unused;
+    };
+    void* constantData{};
+    if (FAILED(constants->Map(0, &noRead, &constantData))) return false;
+    const ConversionConstants decode{ width, height, 0, 0 };
+    const ConversionConstants encode{ width, height, 1, 0 };
+    std::memcpy(constantData, &decode, sizeof(decode));
+    std::memcpy(
+        static_cast<uint8_t*>(constantData) +
+            D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT,
+        &encode,
+        sizeof(encode));
+    D3D12_RANGE writtenConstants{ 0, constantsDesc.Width };
+    constants->Unmap(0, &writtenConstants);
+
+    D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc{};
+    descriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    descriptorHeapDesc.NumDescriptors = 4;
+    descriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeap;
+    if (FAILED(device->CreateDescriptorHeap(
+            &descriptorHeapDesc,
+            IID_PPV_ARGS(descriptorHeap.GetAddressOf()))))
+    {
+        return false;
+    }
+    const UINT descriptorSize = device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const auto cpuStart =
+        descriptorHeap->GetCPUDescriptorHandleForHeapStart();
+    auto cpuHandle = [&](UINT index)
+    {
+        return D3D12_CPU_DESCRIPTOR_HANDLE{
+            cpuStart.ptr + index * descriptorSize
+        };
+    };
+    D3D12_SHADER_RESOURCE_VIEW_DESC inputSrv{};
+    inputSrv.Shader4ComponentMapping =
+        D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    inputSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    inputSrv.Format = inputDesc.Format;
+    inputSrv.Texture2D.MipLevels = 1;
+    device->CreateShaderResourceView(
+        input.Get(),
+        &inputSrv,
+        cpuHandle(0));
+    D3D12_UNORDERED_ACCESS_VIEW_DESC linearUav{};
+    linearUav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    linearUav.Format = linearDesc.Format;
+    device->CreateUnorderedAccessView(
+        linear.Get(),
+        nullptr,
+        &linearUav,
+        cpuHandle(1));
+    D3D12_SHADER_RESOURCE_VIEW_DESC linearSrv = inputSrv;
+    linearSrv.Format = linearDesc.Format;
+    device->CreateShaderResourceView(
+        linear.Get(),
+        &linearSrv,
+        cpuHandle(2));
+    D3D12_UNORDERED_ACCESS_VIEW_DESC outputUav = linearUav;
+    outputUav.Format = outputDesc.Format;
+    device->CreateUnorderedAccessView(
+        output.Get(),
+        nullptr,
+        &outputUav,
+        cpuHandle(3));
+
+    D3D12_COMMAND_QUEUE_DESC queueDesc{};
+    Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue;
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
+    Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+    if (FAILED(device->CreateCommandQueue(
+            &queueDesc,
+            IID_PPV_ARGS(queue.GetAddressOf()))) ||
+        FAILED(device->CreateCommandAllocator(
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            IID_PPV_ARGS(allocator.GetAddressOf()))) ||
+        FAILED(device->CreateCommandList(
+            0,
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            allocator.Get(),
+            pipeline.Get(),
+            IID_PPV_ARGS(commandList.GetAddressOf()))) ||
+        FAILED(device->CreateFence(
+            0,
+            D3D12_FENCE_FLAG_NONE,
+            IID_PPV_ARGS(fence.GetAddressOf()))))
+    {
+        return false;
+    }
+    D3D12_TEXTURE_COPY_LOCATION uploadLocation{};
+    uploadLocation.pResource = upload.Get();
+    uploadLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    uploadLocation.PlacedFootprint = footprint;
+    D3D12_TEXTURE_COPY_LOCATION inputLocation{};
+    inputLocation.pResource = input.Get();
+    inputLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    commandList->CopyTextureRegion(
+        &inputLocation,
+        0,
+        0,
+        0,
+        &uploadLocation,
+        nullptr);
+    D3D12_RESOURCE_BARRIER barriers[2]{};
+    barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barriers[0].Transition.pResource = input.Get();
+    barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    barriers[0].Transition.StateAfter =
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    barriers[0].Transition.Subresource =
+        D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barriers[1].Transition.pResource = linear.Get();
+    barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    barriers[1].Transition.StateAfter =
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barriers[1].Transition.Subresource =
+        D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    commandList->ResourceBarrier(2, barriers);
+    commandList->SetComputeRootSignature(rootSignature.Get());
+    ID3D12DescriptorHeap* heaps[]{ descriptorHeap.Get() };
+    commandList->SetDescriptorHeaps(1, heaps);
+    const auto gpuStart =
+        descriptorHeap->GetGPUDescriptorHandleForHeapStart();
+    auto gpuHandle = [&](UINT index)
+    {
+        return D3D12_GPU_DESCRIPTOR_HANDLE{
+            gpuStart.ptr + index * descriptorSize
+        };
+    };
+    commandList->SetComputeRootDescriptorTable(0, gpuHandle(0));
+    commandList->SetComputeRootDescriptorTable(1, gpuHandle(1));
+    commandList->SetComputeRootConstantBufferView(
+        2,
+        constants->GetGPUVirtualAddress());
+    commandList->Dispatch(1, 1, 1);
+
+    barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barriers[0].UAV.pResource = linear.Get();
+    barriers[1].Transition.pResource = linear.Get();
+    barriers[1].Transition.StateBefore =
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barriers[1].Transition.StateAfter =
+        D3D12_RESOURCE_STATE_COPY_SOURCE;
+    commandList->ResourceBarrier(2, barriers);
+    D3D12_TEXTURE_COPY_LOCATION linearLocation{};
+    linearLocation.pResource = linear.Get();
+    linearLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    D3D12_TEXTURE_COPY_LOCATION linearReadbackLocation{};
+    linearReadbackLocation.pResource = linearReadback.Get();
+    linearReadbackLocation.Type =
+        D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    linearReadbackLocation.PlacedFootprint = linearFootprint;
+    commandList->CopyTextureRegion(
+        &linearReadbackLocation,
+        0,
+        0,
+        0,
+        &linearLocation,
+        nullptr);
+    barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barriers[1].Transition.StateAfter =
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    commandList->ResourceBarrier(1, &barriers[1]);
+    D3D12_RESOURCE_BARRIER outputBarrier{};
+    outputBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    outputBarrier.Transition.pResource = output.Get();
+    outputBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    outputBarrier.Transition.StateAfter =
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    outputBarrier.Transition.Subresource =
+        D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    commandList->ResourceBarrier(1, &outputBarrier);
+    commandList->SetComputeRootDescriptorTable(0, gpuHandle(2));
+    commandList->SetComputeRootDescriptorTable(1, gpuHandle(3));
+    commandList->SetComputeRootConstantBufferView(
+        2,
+        constants->GetGPUVirtualAddress() +
+            D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+    commandList->Dispatch(1, 1, 1);
+    outputBarrier.Transition.StateBefore =
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    outputBarrier.Transition.StateAfter =
+        D3D12_RESOURCE_STATE_COPY_SOURCE;
+    commandList->ResourceBarrier(1, &outputBarrier);
+    D3D12_TEXTURE_COPY_LOCATION outputLocation{};
+    outputLocation.pResource = output.Get();
+    outputLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    D3D12_TEXTURE_COPY_LOCATION readbackLocation{};
+    readbackLocation.pResource = readback.Get();
+    readbackLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    readbackLocation.PlacedFootprint = footprint;
+    commandList->CopyTextureRegion(
+        &readbackLocation,
+        0,
+        0,
+        0,
+        &outputLocation,
+        nullptr);
+    if (FAILED(commandList->Close())) return false;
+    ID3D12CommandList* lists[]{ commandList.Get() };
+    queue->ExecuteCommandLists(1, lists);
+    // Test-only readback drain. Production resources retire through their
+    // graphics ordering or the swapchain's AddRef'd last-reader fence.
+    if (FAILED(queue->Signal(fence.Get(), 1)) ||
+        !waitForFence(fence.Get(), 1))
+    {
+        return false;
+    }
+    void* readbackData{};
+    D3D12_RANGE readRange{ 0, uploadBytes };
+    if (FAILED(readback->Map(0, &readRange, &readbackData)))
+    {
+        return false;
+    }
+    void* linearReadbackData{};
+    D3D12_RANGE linearReadRange{ 0, linearReadbackBytes };
+    if (FAILED(linearReadback->Map(
+            0,
+            &linearReadRange,
+            &linearReadbackData)))
+    {
+        readback->Unmap(0, nullptr);
+        return false;
+    }
+    bool valid = true;
+    for (UINT row = 0; row < height; ++row)
+    {
+        const auto* actual =
+            static_cast<const uint8_t*>(readbackData) +
+            footprint.Offset +
+            row * footprint.Footprint.RowPitch;
+        const auto* expected = reinterpret_cast<const uint8_t*>(
+            sourcePixels.data() + row * width);
+        for (UINT i = 0; i < width * sizeof(sourcePixels[0]); ++i)
+        {
+            if (std::abs(
+                    static_cast<int>(actual[i]) -
+                    static_cast<int>(expected[i])) > 1)
+            {
+                valid = false;
+            }
+        }
+        const auto* actualLinear =
+            reinterpret_cast<const uint16_t*>(
+                static_cast<const uint8_t*>(linearReadbackData) +
+                linearFootprint.Offset +
+                row * linearFootprint.Footprint.RowPitch);
+        const auto* source =
+            sourcePixels.data() + row * width;
+        for (UINT pixel = 0; pixel < width; ++pixel)
+        {
+            for (UINT channel = 0; channel < 4; ++channel)
+            {
+                const float sourceValue =
+                    source[pixel][channel] / 255.0f;
+                const float expectedLinear =
+                    channel == 3 ?
+                        sourceValue :
+                        std::pow(sourceValue, 2.2f);
+                const float actualValue =
+                    DirectX::PackedVector::XMConvertHalfToFloat(
+                        actualLinear[pixel * 4 + channel]);
+                const float tolerance =
+                    channel == 3 ?
+                        0.0006f :
+                        std::max(0.0002f, expectedLinear * 0.003f);
+                if (std::abs(actualValue - expectedLinear) > tolerance)
+                {
+                    valid = false;
+                }
+            }
+        }
+    }
+    D3D12_RANGE noWrite{ 0, 0 };
+    readback->Unmap(0, &noWrite);
+    linearReadback->Unmap(0, &noWrite);
     return valid;
 }
 
@@ -640,15 +1203,61 @@ bool validatesCompletionLifecycle(
     return supported;
 }
 
+struct ApiFunctions
+{
+    PfnFfxCreateContext create{};
+    PfnFfxDestroyContext destroy{};
+    PfnFfxConfigure configure{};
+    PfnFfxQuery query{};
+    PfnFfxDispatch dispatch{};
+
+    explicit operator bool() const
+    {
+        return create && destroy && configure && query && dispatch;
+    }
+};
+
+ApiFunctions getApi(HMODULE module)
+{
+    return {
+        reinterpret_cast<PfnFfxCreateContext>(
+            GetProcAddress(module, "ffxCreateContext")),
+        reinterpret_cast<PfnFfxDestroyContext>(
+            GetProcAddress(module, "ffxDestroyContext")),
+        reinterpret_cast<PfnFfxConfigure>(
+            GetProcAddress(module, "ffxConfigure")),
+        reinterpret_cast<PfnFfxQuery>(
+            GetProcAddress(module, "ffxQuery")),
+        reinterpret_cast<PfnFfxDispatch>(
+            GetProcAddress(module, "ffxDispatch"))
+    };
+}
+
+bool isAmdAdapter(ID3D12Device* device)
+{
+    Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
+    Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+    DXGI_ADAPTER_DESC1 desc{};
+    return device &&
+        SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf()))) &&
+        SUCCEEDED(factory->EnumAdapterByLuid(
+            device->GetAdapterLuid(),
+            IID_PPV_ARGS(adapter.GetAddressOf()))) &&
+        SUCCEEDED(adapter->GetDesc1(&desc)) &&
+        desc.VendorId == 0x1002;
+}
+
 }
 
 int wmain(int argc, wchar_t** argv)
 {
-    if (argc != 5)
+    if (argc != 7)
     {
         std::cerr << "usage: fsr-provider-runtime-regression "
-            "<project-upscaler> <project-frame-generation> <official-loader> "
-            "<color-transfer-shader>\n";
+            "<project-upscaler> <project-frame-generation> "
+            "<official-upscaler> <official-frame-generation> "
+            "<fsr3-color-transfer-shader> "
+            "<ml-color-adapter-shader>\n";
         return 2;
     }
 
@@ -660,23 +1269,27 @@ int wmain(int argc, wchar_t** argv)
         argv[2],
         nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    HMODULE loader = LoadLibraryExW(
+    HMODULE officialUpscaler = LoadLibraryExW(
         argv[3],
         nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (!upscaler || !frameGeneration || !loader)
+    HMODULE officialFrameGeneration = LoadLibraryExW(
+        argv[4],
+        nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (!upscaler || !frameGeneration ||
+        !officialUpscaler || !officialFrameGeneration)
     {
         std::cerr << "Failed to load FidelityFX runtime modules: "
             << GetLastError() << '\n';
         return 1;
     }
 
-    const auto query = reinterpret_cast<PfnFfxQuery>(
-        GetProcAddress(loader, "ffxQuery"));
-    const auto create = reinterpret_cast<PfnFfxCreateContext>(
-        GetProcAddress(loader, "ffxCreateContext"));
-    const auto destroy = reinterpret_cast<PfnFfxDestroyContext>(
-        GetProcAddress(loader, "ffxDestroyContext"));
+    const ApiFunctions upscalerApi = getApi(upscaler);
+    const ApiFunctions frameGenerationApi = getApi(frameGeneration);
+    const ApiFunctions officialUpscalerApi = getApi(officialUpscaler);
+    const ApiFunctions officialFrameGenerationApi =
+        getApi(officialFrameGeneration);
     Microsoft::WRL::ComPtr<ID3D12Device> device;
     const HRESULT deviceResult = D3D12CreateDevice(
         nullptr,
@@ -684,52 +1297,156 @@ int wmain(int argc, wchar_t** argv)
         IID_PPV_ARGS(device.GetAddressOf()));
     uint64_t swapchainVersionId{};
     const bool providersValid =
-        query &&
-        create &&
-        destroy &&
+        upscalerApi &&
+        frameGenerationApi &&
+        officialUpscalerApi &&
+        officialFrameGenerationApi &&
         SUCCEEDED(deviceResult) &&
         findVersion(
-            query,
+            upscalerApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
             device.Get(),
             "3.1.5") &&
         findVersion(
-            query,
+            frameGenerationApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION,
             device.Get(),
             "3.1.6") &&
         findVersion(
-            query,
+            frameGenerationApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_NEW_DX12,
             device.Get(),
             "3.1.7") &&
         findVersion(
-            query,
+            frameGenerationApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12,
             device.Get(),
             "3.1.7",
             &swapchainVersionId);
+    const bool fsr4Available =
+        providersValid &&
+        findVersion(
+            officialUpscalerApi.query,
+            FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
+            device.Get(),
+            "4.1.1");
+    const bool mlfgAvailable =
+        providersValid &&
+        findVersion(
+            officialFrameGenerationApi.query,
+            FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION,
+            device.Get(),
+            "4.0.1");
+    const auto fsr4UnavailableReason =
+        sl::fsr::getMachineLearningUnavailableReason(
+            device.Get(),
+            true,
+            fsr4Available,
+            false);
+    const auto mlfgUnavailableReason =
+        sl::fsr::getMachineLearningUnavailableReason(
+            device.Get(),
+            true,
+            mlfgAvailable,
+            true);
+    const auto d3d12Runtime =
+        sl::fsr::getD3D12RuntimeCapabilities(device.Get());
+    sl::FSRCapabilities publicRuntime{};
+    sl::fsr::setD3D12RuntimeCapabilities(
+        device.Get(),
+        publicRuntime);
+    const bool shaderModel66 =
+        d3d12Runtime.shaderModelMajor > 6 ||
+        (d3d12Runtime.shaderModelMajor == 6 &&
+         d3d12Runtime.shaderModelMinor >= 6);
+    const bool runtimeCapabilitiesValid =
+        d3d12Runtime.runtimeSource !=
+            sl::FSRD3D12RuntimeSource::eUnknown &&
+        d3d12Runtime.coreVersionMajor != 0 &&
+        publicRuntime.windows11OrGreater ==
+            (d3d12Runtime.windows11OrGreater ?
+                sl::Boolean::eTrue :
+                sl::Boolean::eFalse) &&
+        publicRuntime.shaderModelMajor ==
+            d3d12Runtime.shaderModelMajor &&
+        publicRuntime.shaderModelMinor ==
+            d3d12Runtime.shaderModelMinor &&
+        publicRuntime.d3d12RuntimeSource ==
+            d3d12Runtime.runtimeSource &&
+        publicRuntime.d3d12CoreVersionMajor ==
+            d3d12Runtime.coreVersionMajor &&
+        publicRuntime.d3d12CoreVersionMinor ==
+            d3d12Runtime.coreVersionMinor &&
+        (!fsr4Available || shaderModel66) &&
+        (!mlfgAvailable ||
+         (d3d12Runtime.windows11OrGreater && shaderModel66));
+    const auto isSpecificUnavailableReason =
+        [](sl::FSRUnavailableReason reason)
+        {
+            return reason ==
+                    sl::FSRUnavailableReason::eOperatingSystemUnsupported ||
+                reason == sl::FSRUnavailableReason::eRuntimeUnsupported ||
+                reason == sl::FSRUnavailableReason::eHardwareUnsupported;
+        };
+    const bool unavailableReasonValid =
+        isAmdAdapter(device.Get()) ||
+        ((fsr4Available ||
+          isSpecificUnavailableReason(fsr4UnavailableReason)) &&
+         (mlfgAvailable ||
+          isSpecificUnavailableReason(mlfgUnavailableReason)));
     const bool colorValid =
-        providersValid && validatesColorContract(device.Get(), argv[4]);
+        providersValid && validatesColorContract(device.Get(), argv[5]);
+    const bool gamma22LinearAdapterValid =
+        validatesGamma22LinearAdapter(device.Get(), argv[6]);
     const bool completionValid =
         providersValid && validatesCompletionLifecycle(
-            create,
-            destroy,
-            query,
+            frameGenerationApi.create,
+            frameGenerationApi.destroy,
+            frameGenerationApi.query,
             device.Get(),
             swapchainVersionId);
-    const bool valid = providersValid && colorValid && completionValid;
+    const bool valid =
+        providersValid &&
+        runtimeCapabilitiesValid &&
+        unavailableReasonValid &&
+        colorValid &&
+        gamma22LinearAdapterValid &&
+        completionValid;
 
-    FreeLibrary(loader);
+    FreeLibrary(officialFrameGeneration);
+    FreeLibrary(officialUpscaler);
     FreeLibrary(frameGeneration);
     FreeLibrary(upscaler);
     if (!valid)
     {
         std::cerr << "Contract status: providers=" << providersValid
+            << ", runtime-capabilities=" << runtimeCapabilitiesValid
+            << ", unavailable-reason=" << unavailableReasonValid
+            << ", fsr4=" << fsr4Available
+            << ", mlfg=" << mlfgAvailable
+            << ", fsr4-reason="
+            << static_cast<uint32_t>(fsr4UnavailableReason)
+            << ", mlfg-reason="
+            << static_cast<uint32_t>(mlfgUnavailableReason)
             << ", color=" << colorValid
+            << ", gamma22-linear-adapter="
+            << gamma22LinearAdapterValid
             << ", completion=" << completionValid << '\n';
         return 1;
     }
-    std::cout << "FidelityFX provider discovery, color transfer, and completion passed.\n";
+    std::cout << "FidelityFX direct provider discovery, ML capability gating, "
+        "active D3D12 runtime, FSR3 color transfer, Gamma 2.2 linear adapter, "
+        "and completion passed. "
+        "D3D12Core=" << d3d12Runtime.coreVersionMajor << '.'
+        << d3d12Runtime.coreVersionMinor << '.'
+        << d3d12Runtime.coreVersionPatch << '.'
+        << d3d12Runtime.coreVersionRevision << ", SM="
+        << d3d12Runtime.shaderModelMajor << '.'
+        << d3d12Runtime.shaderModelMinor << ", requested SDK="
+        << d3d12Runtime.requestedSDKVersion << ", FSR4="
+        << fsr4Available << " (reason "
+        << static_cast<uint32_t>(fsr4UnavailableReason)
+        << "), MLFG=" << mlfgAvailable << " (reason "
+        << static_cast<uint32_t>(mlfgUnavailableReason) << ").\n";
     return 0;
 }

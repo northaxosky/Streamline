@@ -43,26 +43,54 @@ inline uint32_t getUpscaleColorCreateFlags(FSRColorSpace colorSpace)
     return flags;
 }
 
-inline uint32_t getUpscaleColorDispatchFlags(FSRColorSpace colorSpace)
+inline bool getUpscaleColorDispatchFlags(
+    FSRColorSpace colorSpace,
+    bool allowProjectGamma22,
+    uint32_t& flags)
 {
     switch (colorSpace)
     {
-        case FSRColorSpace::eSRGB: return FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB;
-        case FSRColorSpace::ePQ: return FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ;
-        case FSRColorSpace::eGamma22: return FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2;
-        default: return 0;
+        case FSRColorSpace::eLinear:
+            flags = 0;
+            return true;
+        case FSRColorSpace::eSRGB:
+            flags = FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB;
+            return true;
+        case FSRColorSpace::ePQ:
+            flags = FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ;
+            return true;
+        case FSRColorSpace::eGamma22:
+            if (!allowProjectGamma22) return false;
+            flags = FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2;
+            return true;
+        default:
+            return false;
     }
 }
 
-inline FfxApiBackbufferTransferFunction getFrameGenerationTransferFunction(
-    FSRColorSpace colorSpace)
+inline bool getFrameGenerationTransferFunction(
+    FSRColorSpace colorSpace,
+    bool allowProjectGamma22,
+    uint32_t& transferFunction)
 {
     switch (colorSpace)
     {
-        case FSRColorSpace::eLinear: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SCRGB;
-        case FSRColorSpace::ePQ: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_PQ;
-        case FSRColorSpace::eGamma22: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2;
-        default: return FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
+        case FSRColorSpace::eLinear:
+            transferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SCRGB;
+            return true;
+        case FSRColorSpace::eSRGB:
+            transferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
+            return true;
+        case FSRColorSpace::ePQ:
+            transferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_PQ;
+            return true;
+        case FSRColorSpace::eGamma22:
+            if (!allowProjectGamma22) return false;
+            transferFunction =
+                FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2;
+            return true;
+        default:
+            return false;
     }
 }
 
