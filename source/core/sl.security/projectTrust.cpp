@@ -235,9 +235,10 @@ bool isProjectPlugin(std::string_view basename)
 
 bool isKnownAmdModule(std::string_view basename)
 {
-    constexpr std::array<std::string_view, 1> names
+    constexpr std::array<std::string_view, 2> names
     {
-        "amd_fidelityfx_loader_dx12.dll",
+        "amd_fidelityfx_upscaler_dx12.dll",
+        "amd_fidelityfx_framegeneration_dx12.dll",
     };
     return std::find(names.begin(), names.end(), basename) != names.end();
 }
@@ -246,8 +247,8 @@ bool isProjectVendorModule(std::string_view basename)
 {
     constexpr std::array<std::string_view, 2> names
     {
-        "amd_fidelityfx_upscaler_dx12.dll",
-        "amd_fidelityfx_framegeneration_dx12.dll",
+        "cs_fidelityfx_upscaler_dx12.dll",
+        "cs_fidelityfx_framegeneration_dx12.dll",
     };
     return std::find(names.begin(), names.end(), basename) != names.end();
 }

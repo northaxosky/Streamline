@@ -24,8 +24,6 @@
 
 #include <filesystem>
 #include <string>
-#include <vector>
-
 #include <d3d12.h>
 
 #include "external/fidelityfx-sdk/Kits/FidelityFX/api/include/ffx_api.h"
@@ -43,14 +41,20 @@ public:
     Runtime& operator=(const Runtime&) = delete;
     ~Runtime();
 
-    bool initialize(const std::filesystem::path& directory, bool upscaler, bool frameGeneration);
+    //! Loads one FidelityFX API module by its authenticated full path.
+    //!
+    //! FidelityFX effect modules export the same five-function public API as
+    //! the loader. Keeping one Runtime per module guarantees that contexts are
+    //! always configured, dispatched, queried, and destroyed by their owner.
+    bool initialize(const std::filesystem::path& modulePath);
     void shutdown();
 
     bool selectProvider(
         ffxStructType_t createDescType,
         ID3D12Device* device,
         const char* expectedVersion,
-        ProviderVersion& provider) const;
+        ProviderVersion& provider,
+        bool logUnavailable = true) const;
     bool validateProvider(ffxContext context, const ProviderVersion& provider) const;
 
     ffxReturnCode_t create(ffxContext* context, ffxCreateContextDescHeader* desc) const;
@@ -62,8 +66,7 @@ public:
     explicit operator bool() const;
 
 private:
-    HMODULE m_loader{};
-    std::vector<HMODULE> m_providers{};
+    HMODULE m_module{};
     PfnFfxCreateContext m_create{};
     PfnFfxDestroyContext m_destroy{};
     PfnFfxConfigure m_configure{};
@@ -72,5 +75,6 @@ private:
 };
 
 FfxApiResource getResource(ID3D12Resource* resource, D3D12_RESOURCE_STATES state);
+D3D12_RESOURCE_STATES getD3D12ResourceState(uint32_t state);
 
 }

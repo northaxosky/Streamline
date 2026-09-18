@@ -5,8 +5,13 @@
 
 int main()
 {
-    std::array<uint64_t, 3> ids{ 71, 143, 811 };
-    std::array<const char*, 3> names{ "4.0.1", "3.1.5", "3.1.6" };
+    std::array<uint64_t, 4> ids{ 71, 143, 811, 1601 };
+    std::array<const char*, 4> names{
+        "4.0.1",
+        "3.1.5",
+        "3.1.6",
+        "4.1.1"
+    };
     sl::fsr::ProviderVersion selected{};
 
     if (!sl::fsr::chooseProviderVersion(ids, names, "3.1.5", selected) ||
@@ -18,6 +23,15 @@ int main()
         return 1;
     }
     const sl::fsr::ProviderVersion retained = selected;
+    if (!sl::fsr::chooseProviderVersion(ids, names, "4.1.1", selected) ||
+        selected.id != 1601 || selected.major != 4 ||
+        selected.minor != 1 || selected.patch != 1 ||
+        selected.name != "4.1.1")
+    {
+        std::cerr << "Exact FSR4 provider version was not selected.\n";
+        return 1;
+    }
+    selected = retained;
     if (sl::fsr::chooseProviderVersion(ids, names, "3.1.7", selected) ||
         sl::fsr::chooseProviderVersion(
             std::span<const uint64_t>(ids.data(), ids.size() - 1),

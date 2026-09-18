@@ -56,13 +56,16 @@ $knownRoles = @{
     }
     AmdModule        = @{
         Value = 5
-        Names = @("amd_fidelityfx_loader_dx12.dll")
+        Names = @(
+            "amd_fidelityfx_upscaler_dx12.dll",
+            "amd_fidelityfx_framegeneration_dx12.dll"
+        )
     }
     ProjectVendorModule = @{
         Value = 6
         Names = @(
-            "amd_fidelityfx_upscaler_dx12.dll",
-            "amd_fidelityfx_framegeneration_dx12.dll"
+            "cs_fidelityfx_upscaler_dx12.dll",
+            "cs_fidelityfx_framegeneration_dx12.dll"
         )
     }
 }

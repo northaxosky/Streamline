@@ -25,6 +25,8 @@
 #include "source/core/sl.log/log.h"
 #include "source/core/sl.security/secureLoadLibrary.h"
 
+#include <vector>
+
 namespace sl::fsr
 {
 
@@ -56,7 +58,7 @@ bool resolve(HMODULE module, const char* name, T& function)
     function = reinterpret_cast<T>(GetProcAddress(module, name));
     if (!function)
     {
-        SL_LOG_ERROR("FidelityFX loader is missing export '%s'", name);
+        SL_LOG_ERROR("FidelityFX API module is missing export '%s'", name);
         return false;
     }
     return true;
@@ -69,40 +71,25 @@ Runtime::~Runtime()
     shutdown();
 }
 
-bool Runtime::initialize(const std::filesystem::path& directory, bool upscaler, bool frameGeneration)
+bool Runtime::initialize(const std::filesystem::path& modulePath)
 {
     shutdown();
 
-    std::vector<const wchar_t*> providerNames;
-    if (upscaler) providerNames.push_back(L"amd_fidelityfx_upscaler_dx12.dll");
-    if (frameGeneration) providerNames.push_back(L"amd_fidelityfx_framegeneration_dx12.dll");
-    for (const auto* name : providerNames)
+    m_module = security::loadLibrary(modulePath.c_str());
+    if (!m_module)
     {
-        const auto path = directory / name;
-        HMODULE provider = security::loadLibrary(path.c_str());
-        if (!provider)
-        {
-            SL_LOG_ERROR("Failed to authenticate and load FidelityFX provider '%S'", path.c_str());
-            shutdown();
-            return false;
-        }
-        m_providers.push_back(provider);
-    }
-
-    const auto loaderPath = directory / L"amd_fidelityfx_loader_dx12.dll";
-    m_loader = security::loadLibrary(loaderPath.c_str());
-    if (!m_loader)
-    {
-        SL_LOG_ERROR("Failed to authenticate and load FidelityFX loader '%S'", loaderPath.c_str());
+        SL_LOG_ERROR(
+            "Failed to authenticate and load FidelityFX API module '%S'",
+            modulePath.c_str());
         shutdown();
         return false;
     }
 
-    if (!resolve(m_loader, "ffxCreateContext", m_create) ||
-        !resolve(m_loader, "ffxDestroyContext", m_destroy) ||
-        !resolve(m_loader, "ffxConfigure", m_configure) ||
-        !resolve(m_loader, "ffxQuery", m_query) ||
-        !resolve(m_loader, "ffxDispatch", m_dispatch))
+    if (!resolve(m_module, "ffxCreateContext", m_create) ||
+        !resolve(m_module, "ffxDestroyContext", m_destroy) ||
+        !resolve(m_module, "ffxConfigure", m_configure) ||
+        !resolve(m_module, "ffxQuery", m_query) ||
+        !resolve(m_module, "ffxDispatch", m_dispatch))
     {
         shutdown();
         return false;
@@ -117,23 +104,19 @@ void Runtime::shutdown()
     m_configure = {};
     m_query = {};
     m_dispatch = {};
-    if (m_loader)
+    if (m_module)
     {
-        FreeLibrary(m_loader);
-        m_loader = {};
+        FreeLibrary(m_module);
+        m_module = {};
     }
-    for (auto it = m_providers.rbegin(); it != m_providers.rend(); ++it)
-    {
-        FreeLibrary(*it);
-    }
-    m_providers.clear();
 }
 
 bool Runtime::selectProvider(
     ffxStructType_t createDescType,
     ID3D12Device* device,
     const char* expectedVersion,
-    ProviderVersion& provider) const
+    ProviderVersion& provider,
+    bool logUnavailable) const
 {
     if (!m_query || !device || !expectedVersion) return false;
 
@@ -159,7 +142,12 @@ bool Runtime::selectProvider(
         return true;
     }
 
-    SL_LOG_ERROR("Required FidelityFX provider version '%s' is unavailable", expectedVersion);
+    if (logUnavailable)
+    {
+        SL_LOG_ERROR(
+            "Required FidelityFX provider version '%s' is unavailable",
+            expectedVersion);
+    }
     return false;
 }
 
@@ -211,6 +199,56 @@ Runtime::operator bool() const
 FfxApiResource getResource(ID3D12Resource* resource, D3D12_RESOURCE_STATES state)
 {
     return ffxApiGetResourceDX12(resource, getFfxState(state));
+}
+
+D3D12_RESOURCE_STATES getD3D12ResourceState(uint32_t state)
+{
+    if (state & FFX_API_RESOURCE_STATE_UNORDERED_ACCESS)
+    {
+        return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    }
+    if (state == FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ)
+    {
+        return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
+    if (state == FFX_API_RESOURCE_STATE_GENERIC_READ)
+    {
+        return D3D12_RESOURCE_STATE_GENERIC_READ;
+    }
+    if (state & FFX_API_RESOURCE_STATE_COMPUTE_READ)
+    {
+        return D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
+    if (state & FFX_API_RESOURCE_STATE_PIXEL_READ)
+    {
+        return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    }
+    if (state & FFX_API_RESOURCE_STATE_COPY_SRC)
+    {
+        return D3D12_RESOURCE_STATE_COPY_SOURCE;
+    }
+    if (state & FFX_API_RESOURCE_STATE_COPY_DEST)
+    {
+        return D3D12_RESOURCE_STATE_COPY_DEST;
+    }
+    if (state & FFX_API_RESOURCE_STATE_INDIRECT_ARGUMENT)
+    {
+        return D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+    }
+    if (state & FFX_API_RESOURCE_STATE_PRESENT)
+    {
+        return D3D12_RESOURCE_STATE_PRESENT;
+    }
+    if (state & FFX_API_RESOURCE_STATE_RENDER_TARGET)
+    {
+        return D3D12_RESOURCE_STATE_RENDER_TARGET;
+    }
+    if (state & FFX_API_RESOURCE_STATE_DEPTH_ATTACHMENT)
+    {
+        return D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    }
+    return D3D12_RESOURCE_STATE_COMMON;
 }
 
 }

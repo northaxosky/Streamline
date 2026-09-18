@@ -1,6 +1,6 @@
 @{
-    ReleaseId = 'cs-streamline-2.14.1-3'
-    ReleaseTag = 'cs-streamline-v2.14.1-3'
+    ReleaseId = 'cs-streamline-2.14.1-4'
+    ReleaseTag = 'cs-streamline-v2.14.1-4'
     KeyId = 1
     PublicKeyXY = '78be6901836d3a547e359a3407387a19bce9efa1ff54486e62bc330d64fcf95d45d50e8f81e993abfdd7de2bdf4574ada03f4883ee7f327a741ba1b9f1e0cfc6'
     Upstream = @{
@@ -13,9 +13,10 @@
         Patch = 'patches/fidelityfx-sdk-2.3.0-fg-completion.patch'
     }
     Runtime = @(
-        @{ Name = 'amd_fidelityfx_loader_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_loader_dx12.dll'; Role = 'AmdModule'; Sha256 = 'e2d85aa05a9bd9ed8b38935fdf5199372cca6f74c12015143bb6f945ee1608aa' }
-        @{ Name = 'amd_fidelityfx_upscaler_dx12.dll'; BuildProject = 'cs_fidelityfx_upscaler_dx12'; SymbolName = 'amd_fidelityfx_upscaler_dx12.pdb'; Role = 'ProjectVendorModule' }
-        @{ Name = 'amd_fidelityfx_framegeneration_dx12.dll'; BuildProject = 'cs_fidelityfx_framegeneration_dx12'; SymbolName = 'amd_fidelityfx_framegeneration_dx12.pdb'; Role = 'ProjectVendorModule' }
+        @{ Name = 'amd_fidelityfx_upscaler_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll'; Role = 'AmdModule'; Sha256 = 'd0dcccc74a43c44ba435b7a369b456e0970d8a4464e4bd683119b374f2c9fb46' }
+        @{ Name = 'amd_fidelityfx_framegeneration_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_dx12.dll'; Role = 'AmdModule'; Sha256 = '02297beedd285e822d3a64f314cf00faf378dcec0edc47ff0c4dd71b3a8c2f18' }
+        @{ Name = 'cs_fidelityfx_upscaler_dx12.dll'; BuildProject = 'cs_fidelityfx_upscaler_dx12'; SymbolName = 'cs_fidelityfx_upscaler_dx12.pdb'; Role = 'ProjectVendorModule' }
+        @{ Name = 'cs_fidelityfx_framegeneration_dx12.dll'; BuildProject = 'cs_fidelityfx_framegeneration_dx12'; SymbolName = 'cs_fidelityfx_framegeneration_dx12.pdb'; Role = 'ProjectVendorModule' }
         @{ Name = 'nvngx_dlss.dll'; ArchivePath = 'bin/x64/nvngx_dlss.dll'; Role = 'NvidiaModule'; Sha256 = '3975567b8943c53acce397f2b72380092f84f162d00b0d2c7d08a1025c563983' }
         @{ Name = 'nvngx_dlssg.dll'; ArchivePath = 'bin/x64/nvngx_dlssg.dll'; Role = 'NvidiaModule'; Sha256 = 'ff6e90eb78b827927dff5b4ecc6b1c870c2e9bca29ed9f48c7d348cc9e170b82' }
         @{ Name = 'sl.common.dll'; BuildProject = 'sl.common'; Role = 'ProjectCommon' }

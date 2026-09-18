@@ -9,7 +9,7 @@ on:
       release_tag:
         description: Exact release tag from config/project-release.psd1
         required: true
-        default: cs-streamline-v2.14.1-3
+        default: cs-streamline-v2.14.1-4
 
 permissions:
   contents: read

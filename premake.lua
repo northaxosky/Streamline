@@ -561,7 +561,7 @@ project "sl.fsr"
 		"./source/plugins/sl.fsr.common/**.cpp"
 	} }
 
-	links { "d3d12.lib", "dxgi.lib" }
+	links { "d3d12.lib", "dxgi.lib", "Version.lib" }
 	removefiles {"./source/core/sl.extra/extra.cpp"}
 
 project "sl.fsr_g"
@@ -587,7 +587,7 @@ project "sl.fsr_g"
 		"./source/plugins/sl.fsr.common/**.cpp"
 	} }
 
-	links { "d3d12.lib", "dxgi.lib" }
+	links { "d3d12.lib", "dxgi.lib", "Version.lib" }
 	removefiles {"./source/core/sl.extra/extra.cpp"}
 
 local function fidelityFxProviderProject(name, target, effectDefine, effectFiles)
@@ -623,7 +623,7 @@ end
 
 fidelityFxProviderProject(
 	"cs_fidelityfx_upscaler_dx12",
-	"amd_fidelityfx_upscaler_dx12",
+	"cs_fidelityfx_upscaler_dx12",
 	"FFX_UPSCALER",
 	{
 		"./_ffx/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp",
@@ -634,7 +634,7 @@ fidelityFxProviderProject(
 
 fidelityFxProviderProject(
 	"cs_fidelityfx_framegeneration_dx12",
-	"amd_fidelityfx_framegeneration_dx12",
+	"cs_fidelityfx_framegeneration_dx12",
 	"FFX_FRAMEGENERATION",
 	{
 		"./_ffx/Kits/FidelityFX/framegeneration/fsr3/internal/**.cpp",

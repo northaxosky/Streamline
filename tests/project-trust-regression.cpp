@@ -372,7 +372,7 @@ int wmain(int argc, wchar_t** argv)
     expectFailure(
         fixtureRoot.parent_path() / "unsigned-amd", cases, "unsigned-amd",
         TrustFailure::eAmdSignatureInvalid,
-        L"amd_fidelityfx_loader_dx12.dll");
+        L"amd_fidelityfx_upscaler_dx12.dll");
     expectFailure(
         fixtureRoot, cases, "wrong-project-plugin-role",
         TrustFailure::eManifestMalformed);
@@ -404,7 +404,7 @@ int wmain(int argc, wchar_t** argv)
     ProjectLoadResult projectVendor = run(
         fixtureRoot, cases / "project-vendor.bin",
         cases / "project-vendor.sig",
-        L"amd_fidelityfx_framegeneration_dx12.dll", trust);
+        L"cs_fidelityfx_framegeneration_dx12.dll", trust);
     check(
         static_cast<bool>(projectVendor),
         "manifest-authorized frame-generation provider authenticates without vendor Authenticode");
@@ -412,18 +412,25 @@ int wmain(int argc, wchar_t** argv)
     ProjectLoadResult projectUpscaler = run(
         fixtureRoot, cases / "project-vendor.bin",
         cases / "project-vendor.sig",
-        L"amd_fidelityfx_upscaler_dx12.dll", trust);
+        L"cs_fidelityfx_upscaler_dx12.dll", trust);
     check(
         static_cast<bool>(projectUpscaler),
         "manifest-authorized upscaler provider authenticates without vendor Authenticode");
 
-    ProjectLoadResult amdModules = run(
+    ProjectLoadResult amdUpscaler = run(
         fixtureRoot, cases / "amd-modules.bin",
         cases / "amd-modules.sig",
-        L"amd_fidelityfx_loader_dx12.dll", trust);
+        L"amd_fidelityfx_upscaler_dx12.dll", trust);
     check(
-        static_cast<bool>(amdModules),
-        "pinned signed AMD FidelityFX modules authenticate");
+        static_cast<bool>(amdUpscaler),
+        "pinned signed AMD FidelityFX upscaler authenticates");
+    ProjectLoadResult amdFrameGeneration = run(
+        fixtureRoot, cases / "amd-modules.bin",
+        cases / "amd-modules.sig",
+        L"amd_fidelityfx_framegeneration_dx12.dll", trust);
+    check(
+        static_cast<bool>(amdFrameGeneration),
+        "pinned signed AMD FidelityFX frame-generation module authenticates");
 
     ProjectLoadResult incomplete = run(
         fixtureRoot, validManifest, cases / "does-not-exist.sig",
