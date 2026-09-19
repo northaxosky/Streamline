@@ -43,6 +43,7 @@
 #include "source/plugins/sl.fsr.common/colorConversionD3D12.h"
 #include "source/plugins/sl.fsr.common/evaluation.h"
 #include "source/plugins/sl.fsr.common/ffxRuntime.h"
+#include "source/plugins/sl.fsr.common/jitter.h"
 #include "source/plugins/sl.fsr.common/providerCapabilities.h"
 #include "source/plugins/sl.fsr/versions.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/include/ffx_upscale.h"
@@ -399,7 +400,8 @@ Result fsrEvaluate(chi::CommandList commandList, const common::EventData& event,
     if (exposure) dispatch.exposure = fsr::getResource(static_cast<ID3D12Resource*>(exposure.getNative()), static_cast<D3D12_RESOURCE_STATES>(exposure.getState()));
     if (reactive) dispatch.reactive = fsr::getResource(static_cast<ID3D12Resource*>(reactive.getNative()), static_cast<D3D12_RESOURCE_STATES>(reactive.getState()));
     if (transparency) dispatch.transparencyAndComposition = fsr::getResource(static_cast<ID3D12Resource*>(transparency.getNative()), static_cast<D3D12_RESOURCE_STATES>(transparency.getState()));
-    dispatch.jitterOffset = { -constants->jitterOffset.x, -constants->jitterOffset.y };
+    dispatch.jitterOffset = fsr::getProviderJitterOffset(
+        constants->jitterOffset);
     dispatch.motionVectorScale = { constants->mvecScale.x * renderSize.width, constants->mvecScale.y * renderSize.height };
     dispatch.renderSize = renderSize;
     dispatch.upscaleSize = outputSize;

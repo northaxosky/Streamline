@@ -1,9 +1,11 @@
 #include "external/fidelityfx-sdk/Kits/FidelityFX/api/include/ffx_api.h"
+#include "external/fidelityfx-sdk/Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_color.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/include/ffx_upscale.h"
 #include "source/plugins/sl.fsr.common/colorConversion.h"
+#include "source/plugins/sl.fsr.common/jitter.h"
 #include "source/plugins/sl.fsr.common/providerCapabilities.h"
 
 #include <d3d12.h>
@@ -1217,6 +1219,603 @@ struct ApiFunctions
     }
 };
 
+bool createTexture(
+    ID3D12Device* device,
+    uint32_t width,
+    uint32_t height,
+    DXGI_FORMAT format,
+    D3D12_RESOURCE_FLAGS flags,
+    D3D12_RESOURCE_STATES state,
+    Microsoft::WRL::ComPtr<ID3D12Resource>& resource)
+{
+    D3D12_HEAP_PROPERTIES heap{};
+    heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = flags;
+    const HRESULT result = device->CreateCommittedResource(
+        &heap,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        state,
+        nullptr,
+        IID_PPV_ARGS(resource.GetAddressOf()));
+    if (FAILED(result))
+    {
+        std::cerr << "Texture creation failed for format "
+            << static_cast<uint32_t>(format) << ": 0x" << std::hex
+            << static_cast<uint32_t>(result) << std::dec << '\n';
+    }
+    return SUCCEEDED(result);
+}
+
+bool uploadTexture(
+    ID3D12Device* device,
+    ID3D12GraphicsCommandList* commandList,
+    ID3D12Resource* texture,
+    const void* data,
+    size_t rowBytes,
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& uploads)
+{
+    const auto desc = texture->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    UINT rows{};
+    UINT64 rowSize{};
+    UINT64 totalBytes{};
+    device->GetCopyableFootprints(
+        &desc,
+        0,
+        1,
+        0,
+        &footprint,
+        &rows,
+        &rowSize,
+        &totalBytes);
+    if (rowBytes > rowSize || rows != desc.Height)
+    {
+        return false;
+    }
+
+    D3D12_HEAP_PROPERTIES heap{};
+    heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12_RESOURCE_DESC buffer{};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = totalBytes;
+    buffer.Height = 1;
+    buffer.DepthOrArraySize = 1;
+    buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    Microsoft::WRL::ComPtr<ID3D12Resource> upload;
+    if (FAILED(device->CreateCommittedResource(
+            &heap,
+            D3D12_HEAP_FLAG_NONE,
+            &buffer,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(upload.GetAddressOf()))))
+    {
+        return false;
+    }
+
+    void* mapped{};
+    D3D12_RANGE noRead{ 0, 0 };
+    if (FAILED(upload->Map(0, &noRead, &mapped)))
+    {
+        return false;
+    }
+    for (UINT row = 0; row < rows; ++row)
+    {
+        std::memcpy(
+            static_cast<uint8_t*>(mapped) +
+                footprint.Offset +
+                static_cast<size_t>(row) * footprint.Footprint.RowPitch,
+            static_cast<const uint8_t*>(data) +
+                static_cast<size_t>(row) * rowBytes,
+            rowBytes);
+    }
+    upload->Unmap(0, nullptr);
+
+    D3D12_TEXTURE_COPY_LOCATION source{};
+    source.pResource = upload.Get();
+    source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    source.PlacedFootprint = footprint;
+    D3D12_TEXTURE_COPY_LOCATION destination{};
+    destination.pResource = texture;
+    destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    commandList->CopyTextureRegion(
+        &destination,
+        0,
+        0,
+        0,
+        &source,
+        nullptr);
+    uploads.push_back(std::move(upload));
+    return true;
+}
+
+bool executeAndWait(
+    ID3D12CommandQueue* queue,
+    ID3D12GraphicsCommandList* commandList,
+    ID3D12Fence* fence,
+    uint64_t fenceValue)
+{
+    if (FAILED(commandList->Close()))
+    {
+        return false;
+    }
+    ID3D12CommandList* lists[]{ commandList };
+    queue->ExecuteCommandLists(1, lists);
+    return SUCCEEDED(queue->Signal(fence, fenceValue)) &&
+        waitForFence(fence, fenceValue);
+}
+
+bool dispatchUpscaleSequence(
+    const ApiFunctions& api,
+    ID3D12Device* device,
+    ID3D12CommandQueue* queue,
+    ID3D12Fence* fence,
+    uint64_t versionId,
+    ID3D12Resource* color,
+    ID3D12Resource* depth,
+    ID3D12Resource* motion,
+    bool useStreamlineTranslation,
+    uint64_t& fenceValue,
+    std::vector<uint8_t>& outputBytes)
+{
+    constexpr uint32_t renderWidth = 64;
+    constexpr uint32_t renderHeight = 64;
+    constexpr uint32_t outputWidth = 96;
+    constexpr uint32_t outputHeight = 96;
+    constexpr size_t outputPixelBytes = sizeof(uint16_t) * 4;
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> output;
+    if (!createTexture(
+            device,
+            outputWidth,
+            outputHeight,
+            DXGI_FORMAT_R16G16B16A16_FLOAT,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            output))
+    {
+        return false;
+    }
+
+    ffxOverrideVersion overrideVersion{
+        { FFX_API_DESC_TYPE_OVERRIDE_VERSION },
+        versionId
+    };
+    ffxCreateBackendDX12Desc backend{
+        {
+            FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12,
+            &overrideVersion.header
+        },
+        device
+    };
+    ffxCreateContextDescUpscaleVersion apiVersion{
+        {
+            FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION,
+            &backend.header
+        },
+        FFX_UPSCALER_VERSION
+    };
+    ffxCreateContextDescUpscale create{
+        {
+            FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
+            &apiVersion.header
+        },
+        FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE,
+        { renderWidth, renderHeight },
+        { outputWidth, outputHeight }
+    };
+    ffxContext context{};
+    const auto createResult =
+        api.create(&context, &create.header, nullptr);
+    if (createResult != FFX_API_RETURN_OK)
+    {
+        std::cerr << "FSR jitter regression context creation failed: "
+            << createResult << '\n';
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
+    bool valid =
+        SUCCEEDED(device->CreateCommandAllocator(
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            IID_PPV_ARGS(allocator.GetAddressOf()))) &&
+        SUCCEEDED(device->CreateCommandList(
+            0,
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            allocator.Get(),
+            nullptr,
+            IID_PPV_ARGS(commandList.GetAddressOf())));
+
+    const std::array<sl::float2, 2> streamlineJitter{
+        sl::float2{ -0.4375f, 0.2407407463f },
+        sl::float2{ 0.46875f, -0.092592597f }
+    };
+    for (size_t frame = 0; valid && frame < streamlineJitter.size(); ++frame)
+    {
+        if (frame != 0)
+        {
+            valid =
+                SUCCEEDED(allocator->Reset()) &&
+                SUCCEEDED(commandList->Reset(allocator.Get(), nullptr));
+            if (!valid) break;
+        }
+
+        ffxDispatchDescUpscale dispatch{
+            { FFX_API_DISPATCH_DESC_TYPE_UPSCALE }
+        };
+        dispatch.commandList = commandList.Get();
+        dispatch.color = ffxApiGetResourceDX12(
+            color,
+            FFX_API_RESOURCE_STATE_COMPUTE_READ);
+        dispatch.depth = ffxApiGetResourceDX12(
+            depth,
+            FFX_API_RESOURCE_STATE_COMPUTE_READ);
+        dispatch.motionVectors = ffxApiGetResourceDX12(
+            motion,
+            FFX_API_RESOURCE_STATE_COMPUTE_READ);
+        dispatch.output = ffxApiGetResourceDX12(
+            output.Get(),
+            FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
+        dispatch.jitterOffset = useStreamlineTranslation ?
+            sl::fsr::getProviderJitterOffset(streamlineJitter[frame]) :
+            FfxApiFloatCoords2D{
+                streamlineJitter[frame].x,
+                streamlineJitter[frame].y
+            };
+        dispatch.motionVectorScale = {
+            static_cast<float>(renderWidth),
+            static_cast<float>(renderHeight)
+        };
+        dispatch.renderSize = { renderWidth, renderHeight };
+        dispatch.upscaleSize = { outputWidth, outputHeight };
+        dispatch.frameTimeDelta = 16.6667f;
+        dispatch.preExposure = 1.0f;
+        dispatch.reset = frame == 0;
+        dispatch.cameraNear = 0.1f;
+        dispatch.cameraFar = 1000.0f;
+        dispatch.cameraFovAngleVertical = 1.0f;
+        dispatch.viewSpaceToMetersFactor = 1.0f;
+        const auto dispatchResult =
+            api.dispatch(&context, &dispatch.header);
+        if (dispatchResult != FFX_API_RETURN_OK)
+        {
+            std::cerr << "FSR jitter regression dispatch failed at frame "
+                << frame << ": " << dispatchResult << '\n';
+            valid = false;
+        }
+        else
+        {
+            valid = executeAndWait(
+                queue,
+                commandList.Get(),
+                fence,
+                ++fenceValue);
+        }
+    }
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> readback;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    UINT rows{};
+    UINT64 rowSize{};
+    UINT64 totalBytes{};
+    if (valid)
+    {
+        const auto outputDesc = output->GetDesc();
+        device->GetCopyableFootprints(
+            &outputDesc,
+            0,
+            1,
+            0,
+            &footprint,
+            &rows,
+            &rowSize,
+            &totalBytes);
+        D3D12_HEAP_PROPERTIES readbackHeap{};
+        readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC buffer{};
+        buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        buffer.Width = totalBytes;
+        buffer.Height = 1;
+        buffer.DepthOrArraySize = 1;
+        buffer.MipLevels = 1;
+        buffer.SampleDesc.Count = 1;
+        buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        valid = SUCCEEDED(device->CreateCommittedResource(
+            &readbackHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &buffer,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(readback.GetAddressOf())));
+    }
+    if (valid)
+    {
+        valid =
+            SUCCEEDED(allocator->Reset()) &&
+            SUCCEEDED(commandList->Reset(allocator.Get(), nullptr));
+    }
+    if (valid)
+    {
+        D3D12_RESOURCE_BARRIER barrier{};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = output.Get();
+        barrier.Transition.StateBefore =
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        barrier.Transition.StateAfter =
+            D3D12_RESOURCE_STATE_COPY_SOURCE;
+        barrier.Transition.Subresource =
+            D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        commandList->ResourceBarrier(1, &barrier);
+        D3D12_TEXTURE_COPY_LOCATION source{};
+        source.pResource = output.Get();
+        source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        D3D12_TEXTURE_COPY_LOCATION destination{};
+        destination.pResource = readback.Get();
+        destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        destination.PlacedFootprint = footprint;
+        commandList->CopyTextureRegion(
+            &destination,
+            0,
+            0,
+            0,
+            &source,
+            nullptr);
+        valid = executeAndWait(
+            queue,
+            commandList.Get(),
+            fence,
+            ++fenceValue);
+    }
+    if (valid)
+    {
+        outputBytes.resize(
+            static_cast<size_t>(outputWidth) *
+            outputHeight *
+            outputPixelBytes);
+        D3D12_RANGE readRange{ 0, static_cast<SIZE_T>(totalBytes) };
+        void* mapped{};
+        valid = SUCCEEDED(readback->Map(0, &readRange, &mapped));
+        if (valid)
+        {
+            const size_t rowBytes = outputWidth * outputPixelBytes;
+            for (UINT row = 0; row < rows; ++row)
+            {
+                std::memcpy(
+                    outputBytes.data() +
+                        static_cast<size_t>(row) * rowBytes,
+                    static_cast<const uint8_t*>(mapped) +
+                        footprint.Offset +
+                        static_cast<size_t>(row) *
+                            footprint.Footprint.RowPitch,
+                    rowBytes);
+            }
+            D3D12_RANGE noWrite{ 0, 0 };
+            readback->Unmap(0, &noWrite);
+        }
+    }
+
+    api.destroy(&context, nullptr);
+    return valid;
+}
+
+bool validatesJitterTranslation(
+    const ApiFunctions& api,
+    ID3D12Device* device,
+    uint64_t versionId)
+{
+    constexpr uint32_t renderWidth = 64;
+    constexpr uint32_t renderHeight = 64;
+    std::vector<uint16_t> color(
+        static_cast<size_t>(renderWidth) * renderHeight * 4);
+    std::vector<float> depth(
+        static_cast<size_t>(renderWidth) * renderHeight);
+    std::vector<uint16_t> motion(
+        static_cast<size_t>(renderWidth) * renderHeight * 2);
+    for (uint32_t y = 0; y < renderHeight; ++y)
+    {
+        for (uint32_t x = 0; x < renderWidth; ++x)
+        {
+            const size_t pixel =
+                static_cast<size_t>(y) * renderWidth + x;
+            const float checker =
+                ((x / 4 + y / 4) & 1) ? 0.85f : 0.05f;
+            color[pixel * 4 + 0] =
+                DirectX::PackedVector::XMConvertFloatToHalf(checker);
+            color[pixel * 4 + 1] =
+                DirectX::PackedVector::XMConvertFloatToHalf(
+                    static_cast<float>(x) / (renderWidth - 1));
+            color[pixel * 4 + 2] =
+                DirectX::PackedVector::XMConvertFloatToHalf(
+                    static_cast<float>(y) / (renderHeight - 1));
+            color[pixel * 4 + 3] =
+                DirectX::PackedVector::XMConvertFloatToHalf(1.0f);
+            depth[pixel] = 0.2f +
+                0.6f * static_cast<float>(y) / (renderHeight - 1);
+            motion[pixel * 2 + 0] =
+                DirectX::PackedVector::XMConvertFloatToHalf(0.0f);
+            motion[pixel * 2 + 1] =
+                DirectX::PackedVector::XMConvertFloatToHalf(0.0f);
+        }
+    }
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> colorTexture;
+    Microsoft::WRL::ComPtr<ID3D12Resource> depthTexture;
+    Microsoft::WRL::ComPtr<ID3D12Resource> motionTexture;
+    if (!createTexture(
+            device,
+            renderWidth,
+            renderHeight,
+            DXGI_FORMAT_R16G16B16A16_FLOAT,
+            D3D12_RESOURCE_FLAG_NONE,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            colorTexture) ||
+        !createTexture(
+            device,
+            renderWidth,
+            renderHeight,
+            DXGI_FORMAT_R32_FLOAT,
+            D3D12_RESOURCE_FLAG_NONE,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            depthTexture) ||
+        !createTexture(
+            device,
+            renderWidth,
+            renderHeight,
+            DXGI_FORMAT_R16G16_FLOAT,
+            D3D12_RESOURCE_FLAG_NONE,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            motionTexture))
+    {
+        std::cerr << "FSR jitter regression input texture creation failed\n";
+        return false;
+    }
+
+    D3D12_COMMAND_QUEUE_DESC queueDesc{};
+    Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue;
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
+    Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+    if (FAILED(device->CreateCommandQueue(
+            &queueDesc,
+            IID_PPV_ARGS(queue.GetAddressOf()))) ||
+        FAILED(device->CreateCommandAllocator(
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            IID_PPV_ARGS(allocator.GetAddressOf()))) ||
+        FAILED(device->CreateCommandList(
+            0,
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            allocator.Get(),
+            nullptr,
+            IID_PPV_ARGS(commandList.GetAddressOf()))) ||
+        FAILED(device->CreateFence(
+            0,
+            D3D12_FENCE_FLAG_NONE,
+            IID_PPV_ARGS(fence.GetAddressOf()))))
+    {
+        std::cerr << "FSR jitter regression command objects failed\n";
+        return false;
+    }
+
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> uploads;
+    if (!uploadTexture(
+            device,
+            commandList.Get(),
+            colorTexture.Get(),
+            color.data(),
+            renderWidth * sizeof(uint16_t) * 4,
+            uploads) ||
+        !uploadTexture(
+            device,
+            commandList.Get(),
+            depthTexture.Get(),
+            depth.data(),
+            renderWidth * sizeof(float),
+            uploads) ||
+        !uploadTexture(
+            device,
+            commandList.Get(),
+            motionTexture.Get(),
+            motion.data(),
+            renderWidth * sizeof(uint16_t) * 2,
+            uploads))
+    {
+        std::cerr << "FSR jitter regression input upload setup failed\n";
+        return false;
+    }
+    std::array<D3D12_RESOURCE_BARRIER, 3> barriers{};
+    const std::array<ID3D12Resource*, 3> resources{
+        colorTexture.Get(),
+        depthTexture.Get(),
+        motionTexture.Get()
+    };
+    for (size_t i = 0; i < barriers.size(); ++i)
+    {
+        barriers[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barriers[i].Transition.pResource = resources[i];
+        barriers[i].Transition.StateBefore =
+            D3D12_RESOURCE_STATE_COPY_DEST;
+        barriers[i].Transition.StateAfter =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        barriers[i].Transition.Subresource =
+            D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    }
+    commandList->ResourceBarrier(
+        static_cast<UINT>(barriers.size()),
+        barriers.data());
+    uint64_t fenceValue = 1;
+    if (!executeAndWait(
+            queue.Get(),
+            commandList.Get(),
+            fence.Get(),
+            fenceValue))
+    {
+        std::cerr << "FSR jitter regression input upload execution failed\n";
+        return false;
+    }
+    uploads.clear();
+
+    std::vector<uint8_t> directOutput;
+    std::vector<uint8_t> translatedOutput;
+    const bool directValid = dispatchUpscaleSequence(
+        api,
+        device,
+        queue.Get(),
+        fence.Get(),
+        versionId,
+        colorTexture.Get(),
+        depthTexture.Get(),
+        motionTexture.Get(),
+        false,
+        fenceValue,
+        directOutput);
+    const bool translatedValid = dispatchUpscaleSequence(
+        api,
+        device,
+        queue.Get(),
+        fence.Get(),
+        versionId,
+        colorTexture.Get(),
+        depthTexture.Get(),
+        motionTexture.Get(),
+        true,
+        fenceValue,
+        translatedOutput);
+    if (!directValid || !translatedValid ||
+        directOutput.size() != translatedOutput.size())
+    {
+        std::cerr << "FSR jitter regression output failed: direct="
+            << directValid << ", translated=" << translatedValid
+            << ", direct-bytes=" << directOutput.size()
+            << ", translated-bytes=" << translatedOutput.size() << '\n';
+        return false;
+    }
+    size_t differences{};
+    for (size_t i = 0; i < directOutput.size(); ++i)
+    {
+        differences += directOutput[i] != translatedOutput[i];
+    }
+    if (differences != 0)
+    {
+        std::cerr << "FSR production jitter translation changed "
+            << differences << " GPU output byte(s)\n";
+        return false;
+    }
+    return true;
+}
+
 ApiFunctions getApi(HMODULE module)
 {
     return {
@@ -1295,6 +1894,7 @@ int wmain(int argc, wchar_t** argv)
         nullptr,
         D3D_FEATURE_LEVEL_11_0,
         IID_PPV_ARGS(device.GetAddressOf()));
+    uint64_t upscalerVersionId{};
     uint64_t swapchainVersionId{};
     const bool providersValid =
         upscalerApi &&
@@ -1306,7 +1906,8 @@ int wmain(int argc, wchar_t** argv)
             upscalerApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
             device.Get(),
-            "3.1.5") &&
+            "3.1.5",
+            &upscalerVersionId) &&
         findVersion(
             frameGenerationApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION,
@@ -1398,6 +1999,11 @@ int wmain(int argc, wchar_t** argv)
         providersValid && validatesColorContract(device.Get(), argv[5]);
     const bool gamma22LinearAdapterValid =
         validatesGamma22LinearAdapter(device.Get(), argv[6]);
+    const bool jitterTranslationValid =
+        providersValid && validatesJitterTranslation(
+            upscalerApi,
+            device.Get(),
+            upscalerVersionId);
     const bool completionValid =
         providersValid && validatesCompletionLifecycle(
             frameGenerationApi.create,
@@ -1411,7 +2017,8 @@ int wmain(int argc, wchar_t** argv)
         unavailableReasonValid &&
         colorValid &&
         gamma22LinearAdapterValid &&
-        completionValid;
+        completionValid &&
+        jitterTranslationValid;
 
     FreeLibrary(officialFrameGeneration);
     FreeLibrary(officialUpscaler);
@@ -1431,12 +2038,13 @@ int wmain(int argc, wchar_t** argv)
             << ", color=" << colorValid
             << ", gamma22-linear-adapter="
             << gamma22LinearAdapterValid
-            << ", completion=" << completionValid << '\n';
+            << ", completion=" << completionValid
+            << ", jitter-translation=" << jitterTranslationValid << '\n';
         return 1;
     }
     std::cout << "FidelityFX direct provider discovery, ML capability gating, "
         "active D3D12 runtime, FSR3 color transfer, Gamma 2.2 linear adapter, "
-        "and completion passed. "
+        "completion, and production jitter translation passed. "
         "D3D12Core=" << d3d12Runtime.coreVersionMajor << '.'
         << d3d12Runtime.coreVersionMinor << '.'
         << d3d12Runtime.coreVersionPatch << '.'
