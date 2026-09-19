@@ -45,6 +45,7 @@
 #include "source/plugins/sl.common/commonInterface.h"
 #include "source/plugins/sl.fsr.common/colorConversion.h"
 #include "source/plugins/sl.fsr.common/colorConversionD3D12.h"
+#include "source/plugins/sl.fsr.common/evaluation.h"
 #include "source/plugins/sl.fsr.common/ffxRuntime.h"
 #include "source/plugins/sl.fsr.common/providerCapabilities.h"
 #include "source/plugins/sl.fsr_g/versions.h"
@@ -1074,7 +1075,10 @@ bool slOnPluginStartup(const char* jsonConfig, void* device)
     {
         return false;
     }
-    ctx.registerEvaluateCallbacks(kFeatureFSR_G, fsrGPrepare, nullptr);
+    ctx.registerEvaluateCallbacks(
+        kFeatureFSR_G,
+        fsrGPrepare,
+        fsr::endSinglePassEvaluation);
     return true;
 }
 

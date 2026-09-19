@@ -167,8 +167,10 @@ configuration, AMD commit, AMD patch digest, runtime inventory, or signing
 specification.
 
 After signing, `project-release-verifier <bin-directory> --initialize` also
-exercises real Streamline plugin loading and FSR metadata registration. The default
-invocation authenticates files only; neither mode proves in-game rendering.
+exercises real Streamline plugin loading, FSR metadata registration, D3D12
+device registration, and both public FSR evaluation routes. The route check
+expects the plugins' known invalid-state response before resources are
+configured; it does not prove in-game rendering.
 
 ## Security scope
 
