@@ -175,6 +175,8 @@ jobs:
             "tools\project-release-verifier.cpp",
             "source\core\sl.security\physicalFilePath.cpp",
             "source\core\sl.security\projectTrust.cpp",
+            "d3d12.lib",
+            "dxgi.lib",
             "/Fo:_artifacts\project-release\verifier\",
             "/Fe:_artifacts\project-release\verifier\project-release-verifier.exe"
           ) -join " "
