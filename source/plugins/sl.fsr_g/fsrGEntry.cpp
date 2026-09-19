@@ -47,6 +47,7 @@
 #include "source/plugins/sl.fsr.common/colorConversionD3D12.h"
 #include "source/plugins/sl.fsr.common/evaluation.h"
 #include "source/plugins/sl.fsr.common/ffxRuntime.h"
+#include "source/plugins/sl.fsr.common/jitter.h"
 #include "source/plugins/sl.fsr.common/providerCapabilities.h"
 #include "source/plugins/sl.fsr_g/versions.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h"
@@ -703,7 +704,8 @@ Result fsrGPrepare(chi::CommandList commandList, const common::EventData& event,
     prepare.frameID = event.frame;
     prepare.commandList = nativeCommandList;
     prepare.renderSize = renderSize;
-    prepare.jitterOffset = { -constants->jitterOffset.x, -constants->jitterOffset.y };
+    prepare.jitterOffset = fsr::getProviderJitterOffset(
+        constants->jitterOffset);
     prepare.motionVectorScale = { constants->mvecScale.x * renderSize.width, constants->mvecScale.y * renderSize.height };
     prepare.frameTimeDelta = options->frameTimeDeltaMilliseconds;
     prepare.reset = constants->reset == Boolean::eTrue;
