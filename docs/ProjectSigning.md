@@ -158,7 +158,11 @@ configured tag on trusted `main`: a secretless job builds, tests, and assembles
 the candidate before the protected `streamline-release` environment uses the
 single base64-encoded PKCS#8 PEM secret `STREAMLINE_SIGNING_KEY`. The key exists
 only in a restricted temporary file during the signing step and is deleted
-before verification and publication.
+before verification and publication. Manual dispatch defaults to validation
+only: it performs the complete build, signing, verification, qualification,
+and packaging flow and uploads the verified archives without creating or
+updating a tag or release. Tag pushes publish, and manual publication must be
+explicitly enabled; publication always refuses an existing release.
 
 Candidate assembly and signing require an exact committed source tree. The
 commit recorded as `SourceCommit` in the candidate inventory must identify the
@@ -166,11 +170,20 @@ source used for the build; validation rejects a different release
 configuration, AMD commit, AMD patch digest, runtime inventory, or signing
 specification.
 
-After signing, `project-release-verifier <bin-directory> --initialize` also
-exercises real Streamline plugin loading, FSR metadata registration, D3D12
-device registration, and both public FSR evaluation routes. The route check
-expects the plugins' known invalid-state response before resources are
-configured; it does not prove in-game rendering.
+After signing, `project-release-verifier <bin-directory>` is the mandatory
+portable check for the authenticated manifest, signature, and exact package
+payloads. `--initialize` additionally requires a supported physical Intel, AMD,
+or NVIDIA GPU, fails nonzero when none is available, and strictly exercises
+real Streamline plugin loading, FSR metadata registration, D3D12 device
+registration, and both public FSR evaluation routes.
+`--initialize-if-supported` performs the same strict check when such a GPU is
+present, but returns exit code 77 with an explicit skipped status when none is
+available. Factory, enumeration, device, initialization, metadata, route,
+callback, and shutdown errors remain failures. The hosted workflow records the
+GPU result separately; a software-only runner is not GPU qualification and
+requires a separate hardware run. The route check expects the plugins' known
+invalid-state response before resources are configured; it does not prove
+in-game rendering.
 
 ## Security scope
 

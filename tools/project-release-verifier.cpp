@@ -17,9 +17,35 @@ using namespace sl::security;
 namespace
 {
 
+constexpr int kGpuUnavailableExitCode = 77;
+constexpr UINT kAmdVendorId = 0x1002;
+constexpr UINT kNvidiaVendorId = 0x10de;
+constexpr UINT kIntelVendorId = 0x8086;
+constexpr UINT kNvidiaAcpiVendorId = 0x4144564e;
+
+enum class VerificationMode
+{
+    ePortable,
+    eInitialize,
+    eInitializeIfSupported
+};
+
+enum class HardwareStatus
+{
+    eAvailable,
+    eUnavailable,
+    eError
+};
+
 struct DirectoryResolver
 {
     fs::path directory;
+};
+
+struct HardwareDevice
+{
+    HardwareStatus status{ HardwareStatus::eError };
+    Microsoft::WRL::ComPtr<ID3D12Device> device;
 };
 
 bool resolveFromDirectory(
@@ -32,44 +58,109 @@ bool resolveFromDirectory(
     return true;
 }
 
-Microsoft::WRL::ComPtr<ID3D12Device> createD3D12Device()
+bool isSupportedPhysicalAdapter(const DXGI_ADAPTER_DESC1& description)
 {
-    Microsoft::WRL::ComPtr<ID3D12Device> device;
-    if (SUCCEEDED(D3D12CreateDevice(
-            nullptr,
-            D3D_FEATURE_LEVEL_11_0,
-            IID_PPV_ARGS(device.GetAddressOf()))))
+    if (description.Flags &
+        (DXGI_ADAPTER_FLAG_SOFTWARE | DXGI_ADAPTER_FLAG_REMOTE))
     {
-        return device;
+        return false;
+    }
+    return description.VendorId == kIntelVendorId ||
+        description.VendorId == kAmdVendorId ||
+        description.VendorId == kNvidiaVendorId ||
+        description.VendorId == kNvidiaAcpiVendorId;
+}
+
+HardwareDevice createHardwareD3D12Device()
+{
+    HardwareDevice hardware;
+    Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
+    const auto factoryResult =
+        CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf()));
+    if (FAILED(factoryResult))
+    {
+        std::cerr << "DXGI adapter factory creation failed (HRESULT "
+            << factoryResult << ")\n";
+        return hardware;
     }
 
-    Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
-    Microsoft::WRL::ComPtr<IDXGIAdapter> warpAdapter;
-    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf()))) &&
-        SUCCEEDED(factory->EnumWarpAdapter(
-            IID_PPV_ARGS(warpAdapter.GetAddressOf()))) &&
-        SUCCEEDED(D3D12CreateDevice(
-            warpAdapter.Get(),
-            D3D_FEATURE_LEVEL_11_0,
-            IID_PPV_ARGS(device.ReleaseAndGetAddressOf()))))
+    for (UINT index = 0;; ++index)
     {
-        return device;
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        const auto enumerationResult =
+            factory->EnumAdapters1(index, adapter.GetAddressOf());
+        if (enumerationResult == DXGI_ERROR_NOT_FOUND)
+        {
+            hardware.status = HardwareStatus::eUnavailable;
+            return hardware;
+        }
+        if (FAILED(enumerationResult))
+        {
+            std::cerr << "DXGI adapter enumeration failed (HRESULT "
+                << enumerationResult << ")\n";
+            return hardware;
+        }
+
+        DXGI_ADAPTER_DESC1 description{};
+        const auto descriptionResult = adapter->GetDesc1(&description);
+        if (FAILED(descriptionResult))
+        {
+            std::cerr << "DXGI adapter description query failed (HRESULT "
+                << descriptionResult << ")\n";
+            return hardware;
+        }
+        if (!isSupportedPhysicalAdapter(description))
+        {
+            continue;
+        }
+
+        const auto deviceResult = D3D12CreateDevice(
+            adapter.Get(),
+            D3D_FEATURE_LEVEL_11_0,
+            IID_PPV_ARGS(hardware.device.GetAddressOf()));
+        if (FAILED(deviceResult))
+        {
+            std::cerr << "D3D12 device creation failed for a supported "
+                "physical GPU (HRESULT " << deviceResult << ")\n";
+            return hardware;
+        }
+        hardware.status = HardwareStatus::eAvailable;
+        return hardware;
     }
-    return {};
+}
+
+bool parseMode(int argc, wchar_t** argv, VerificationMode& mode)
+{
+    if (argc == 2)
+    {
+        mode = VerificationMode::ePortable;
+        return true;
+    }
+    if (argc != 3)
+    {
+        return false;
+    }
+    const std::wstring_view option = argv[2];
+    if (option == L"--initialize")
+    {
+        mode = VerificationMode::eInitialize;
+        return true;
+    }
+    if (option == L"--initialize-if-supported")
+    {
+        mode = VerificationMode::eInitializeIfSupported;
+        return true;
+    }
+    return false;
 }
 
 bool verifyEvaluationRoutes(
     PFun_slSetFeatureLoaded* setFeatureLoaded,
     PFun_slSetD3DDevice* setD3DDevice,
     PFun_slGetNewFrameToken* getNewFrameToken,
-    PFun_slEvaluateFeature* evaluate)
+    PFun_slEvaluateFeature* evaluate,
+    ID3D12Device* device)
 {
-    const auto device = createD3D12Device();
-    if (!device)
-    {
-        std::cerr << "A D3D12 hardware or WARP device is unavailable\n";
-        return false;
-    }
     const auto disableDLSSG =
         setFeatureLoaded(sl::kFeatureDLSS_G, false);
     if (disableDLSSG != sl::Result::eOk)
@@ -79,7 +170,7 @@ bool verifyEvaluationRoutes(
             << static_cast<int>(disableDLSSG) << ")\n";
         return false;
     }
-    const auto deviceResult = setD3DDevice(device.Get());
+    const auto deviceResult = setD3DDevice(device);
     if (deviceResult != sl::Result::eOk)
     {
         std::cerr << "Streamline D3D12 device registration failed (SDK "
@@ -134,7 +225,10 @@ bool verifyEvaluationRoutes(
     return valid;
 }
 
-bool initializePlugins(HMODULE module, const fs::path& directory)
+bool initializePlugins(
+    HMODULE module,
+    const fs::path& directory,
+    ID3D12Device* device)
 {
     const auto initialize = reinterpret_cast<PFun_slInit*>(
         GetProcAddress(module, "slInit"));
@@ -205,7 +299,8 @@ bool initializePlugins(HMODULE module, const fs::path& directory)
             setFeatureLoaded,
             setD3DDevice,
             getNewFrameToken,
-            evaluate))
+            evaluate,
+            device))
     {
         valid = false;
     }
@@ -228,14 +323,15 @@ bool initializePlugins(HMODULE module, const fs::path& directory)
 
 int wmain(int argc, wchar_t** argv)
 {
-    const bool initialize =
-        argc == 3 && std::wstring_view(argv[2]) == L"--initialize";
-    if (argc != 2 && !initialize)
+    VerificationMode mode{};
+    if (!parseMode(argc, argv, mode))
     {
-        std::cerr << "usage: project-release-verifier <bin-directory> [--initialize]\n";
+        std::cerr << "usage: project-release-verifier <bin-directory> "
+            "[--initialize|--initialize-if-supported]\n";
         return 2;
     }
 
+    const bool initialize = mode != VerificationMode::ePortable;
     const fs::path directory = fs::absolute(argv[1]);
     DirectoryResolver resolver{ directory };
     const std::wstring manifest =
@@ -260,5 +356,32 @@ int wmain(int argc, wchar_t** argv)
             << " (system error " << result.systemError << ")\n";
         return 1;
     }
-    return !initialize || initializePlugins(result.module, directory) ? 0 : 1;
+    if (!initialize)
+    {
+        std::cout << "Authenticated manifest, signature, and package payloads "
+            "passed\n";
+        return 0;
+    }
+
+    const auto hardware = createHardwareD3D12Device();
+    if (hardware.status == HardwareStatus::eUnavailable)
+    {
+        if (mode == VerificationMode::eInitializeIfSupported)
+        {
+            std::cerr << "SKIPPED: authenticated package passed; GPU "
+                "initialization not run because no supported physical Intel, "
+                "AMD, or NVIDIA GPU is available\n";
+            return kGpuUnavailableExitCode;
+        }
+        std::cerr << "Streamline GPU initialization requires a supported "
+            "physical Intel, AMD, or NVIDIA GPU\n";
+        return 1;
+    }
+    if (hardware.status == HardwareStatus::eError)
+    {
+        return 1;
+    }
+    return initializePlugins(result.module, directory, hardware.device.Get())
+        ? 0
+        : 1;
 }
