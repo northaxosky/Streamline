@@ -10,6 +10,11 @@ on:
         description: Exact release tag from config/project-release.psd1
         required: true
         default: cs-streamline-v2.14.1-4
+      publish:
+        description: Publish a new immutable GitHub release
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -217,13 +222,33 @@ jobs:
             Remove-Item Env:STREAMLINE_SIGNING_KEY -ErrorAction SilentlyContinue
           }
 
-      - name: Verify and package release
+      - name: Verify authenticated package
         shell: pwsh
         run: |
           & _artifacts/project-release/verifier/project-release-verifier.exe `
-            "$env:CANDIDATE/package/bin/x64" --initialize
+            "$env:CANDIDATE/package/bin/x64"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Qualify GPU initialization
+        shell: pwsh
+        run: |
+          & _artifacts/project-release/verifier/project-release-verifier.exe `
+            "$env:CANDIDATE/package/bin/x64" --initialize-if-supported
+          $result = $LASTEXITCODE
+          if ($result -eq 77) {
+            $message = "GPU initialization not run: no supported physical GPU; separate hardware qualification required"
+            Write-Output "::warning::$message"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY `
+              -Value "### GPU qualification`n`n⚠️ $message"
+            exit 0
+          }
+          if ($result -ne 0) { exit $result }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY `
+            -Value "### GPU qualification`n`nPASS: Streamline initialization and public FSR routes passed on a supported physical GPU."
+
+      - name: Package verified release
+        shell: pwsh
+        run: |
           $out = "_artifacts/project-release/output"
           New-Item -ItemType Directory -Force $out | Out-Null
           $sdk = Join-Path $out "streamline-sdk-$env:RELEASE_TAG.zip"
@@ -241,7 +266,16 @@ jobs:
             (Join-Path $out "SHA256SUMS.txt"), $hashes,
             [Text.UTF8Encoding]::new($false))
 
+      - name: Upload verified release archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-release-${{ env.RELEASE_TAG }}
+          path: _artifacts/project-release/output
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publish immutable GitHub release
+        if: github.event_name == 'push' || inputs.publish
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
