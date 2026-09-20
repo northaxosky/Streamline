@@ -262,14 +262,16 @@ index 287e09b..fa66011 100644
 +#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
  #include "../../../amdinternal/api/internal/git_hash_branch.h"
  #endif // !defined(_GAMING_XBOX)
+@@ -58,2 +58,3 @@
+ #include "ffx_fsr3upscaler_private.h"
++#include "ffx_fsr3upscaler_color.h"
+ #include "ffx_fsr3upscaler_shaderblobs.h"
 @@ -598 +598 @@ static FfxErrorCode fsr3UpscalerCreate(FfxFsr3UpscalerContext_Private* context,
 -#ifndef _GAMING_XBOX
 +#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
 @@ -687 +687 @@ static FfxErrorCode fsr3UpscalerRelease(FfxFsr3UpscalerContext_Private* context)
 -#ifndef _GAMING_XBOX
 +#if !defined(_GAMING_XBOX) && !defined(FFX_PROJECT_VENDOR_BUILD)
-@@ -65,0 +66 @@
-+#include "ffx_fsr3upscaler_color.h"
 @@ -1041,0 +1043,2 @@ static FfxErrorCode fsr3upscalerDispatch(FfxFsr3UpscalerContext_Private* context
 +    context->constants.inputColorTransferFunction =
 +        ffxFsr3UpscalerGetInputColorTransferFunction(params->flags);
@@ -347,7 +349,10 @@ diff --git a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cp
 index df59908..1652f00 100644
 --- a/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
 +++ b/Kits/FidelityFX/upscalers/fsr3/internal/ffx_provider_fsr3upscale.cpp
-@@ -29,0 +30 @@
+@@ -26,3 +26,4 @@
+ #include "../include/ffx_provider_fsr3upscale.h"
+ #include "../include/ffx_fsr3upscaler.h"
+ #include "../include/gpu/fsr3/ffx_fsr3_resources.h"
 +#include "ffx_fsr3upscaler_color.h"
 @@ -392,0 +394 @@ ffxReturnCode_t ffxProvider_FSR3Upscale::Dispatch(ffxContext* context, const ffx
 +        dispatchParameters.flags |= ffxFsr3UpscalerGetDispatchColorFlags(desc->flags);
