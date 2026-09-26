@@ -9,7 +9,7 @@ on:
       release_tag:
         description: Exact release tag from config/project-release.psd1
         required: true
-        default: cs-streamline-v2.14.1-4
+        default: cs-streamline-v2.14.1-5
       publish:
         description: Publish a new immutable GitHub release
         required: true

@@ -1,6 +1,6 @@
 @{
-    ReleaseId = 'cs-streamline-2.14.1-4'
-    ReleaseTag = 'cs-streamline-v2.14.1-4'
+    ReleaseId = 'cs-streamline-2.14.1-5'
+    ReleaseTag = 'cs-streamline-v2.14.1-5'
     KeyId = 1
     PublicKeyXY = '78be6901836d3a547e359a3407387a19bce9efa1ff54486e62bc330d64fcf95d45d50e8f81e993abfdd7de2bdf4574ada03f4883ee7f327a741ba1b9f1e0cfc6'
     Upstream = @{
