@@ -24,7 +24,7 @@ jobs:
   release:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           lfs: true
@@ -60,9 +60,17 @@ jobs:
           }
 
       - name: Configure MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: amd64
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vs) { throw "Visual Studio C++ tools are unavailable." }
+          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
+          & $env:ComSpec /d /s /c "call `"$vcvars`" >nul && set" |
+            Where-Object { $_ -match '^[^=]+=' } |
+            Add-Content -LiteralPath $env:GITHUB_ENV
 
       - name: Configure SDK projects
         shell: pwsh
