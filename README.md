@@ -73,20 +73,14 @@ Obviously, `sl.dlss_g.dll` cannot be built from source and thus the prebuilt cop
 See the [FSR integration guide](docs/ProgrammingGuideFSR.md) for the project
 FSR 3/FSR 4 API, runtime layout, color, and frame-retirement contracts.
 
-Project-owned `Production` package signing is disabled by default. See
-[Project-owned Streamline package signing](docs/ProjectSigning.md) for the
-private trust component, strict detached manifest format, offline signing
-procedure, and security scope. Locally built unsigned DLLs are not release-ready
-and continue to be rejected by the default `Production` trust policy.
+Project builds are unsigned and load plugins without signature checks; the host
+owns plugin directory selection.
 
-Project releases use `.github/workflows/project-release.yml`: a trusted-main
-build job tests and assembles the pinned runtime, then the protected
-`streamline-release` environment signs and publishes it. The only secret is
-`STREAMLINE_SIGNING_KEY`, containing the base64-encoded PKCS#8 PEM release key.
-Public release identity and upstream pins live only in
-`config/project-release.psd1`; `tools/project-release.ps1 -Mode
-GeneratePublicHeader` produces the stable build input
-`_artifacts/project-release/include/projectTrust.generated.h`.
+Every push to `main` runs `.github/workflows/project-release.yml`, which builds
+Production, runs the regressions, assembles the runtime from the build output and
+the vendor pins in `config/project-release.psd1`, and publishes it as the latest
+release `cs-streamline-<upstream>-<commit>` with `streamline-sdk.zip`,
+`streamline-symbols.zip`, and `SHA256SUMS.txt`.
 
 #### (Optional) Compiling Shaders
 

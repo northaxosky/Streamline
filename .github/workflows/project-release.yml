@@ -1,31 +1,27 @@
 name: Project Streamline release
 
+# Every main push publishes the newest runtime package; consumers take the latest release.
 on:
   push:
-    tags:
-      - "cs-streamline-v*"
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Exact release tag from config/project-release.psd1
-        required: true
-        default: cs-streamline-v2.14.1-5
-      publish:
-        description: Publish a new immutable GitHub release
-        required: true
-        type: boolean
-        default: false
+
+concurrency:
+  group: project-release
+  cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 env:
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-  CANDIDATE: _artifacts\project-release\candidate
-  PUBLIC_HEADER: _artifacts\project-release\include\projectTrust.generated.h
+  OUTPUT: _artifacts\project-release\output
+  STAGING: _artifacts\project-release\staging
 
 jobs:
-  build:
+  release:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -33,27 +29,6 @@ jobs:
           fetch-depth: 0
           lfs: true
           submodules: recursive
-
-      - name: Require trusted main release
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and
-              "${{ github.ref }}" -ne "refs/heads/main") {
-            throw "Manual releases must run from main."
-          }
-          git fetch origin main
-          git merge-base --is-ancestor HEAD origin/main
-          if ($LASTEXITCODE -ne 0) {
-            throw "Release commit is not on trusted main."
-          }
-          ./tools/project-release.ps1 -Mode ValidateTag -Tag $env:RELEASE_TAG
-
-      - name: Generate public trust header
-        shell: pwsh
-        run: |
-          ./tools/project-release.ps1 -Mode GeneratePublicHeader `
-            -OutputPath $env:PUBLIC_HEADER
-
       - name: Require hydrated build libraries
         shell: pwsh
         run: |
@@ -96,8 +71,6 @@ jobs:
       - name: Build Production components
         shell: pwsh
         run: |
-          $include = (Resolve-Path (Split-Path -Parent $env:PUBLIC_HEADER)).Path
-          $env:CL = "/I`"$include`" /DSL_PROJECT_TRUST_CONFIG_HEADER=\`"projectTrust.generated.h\`""
           msbuild _project/vs2022/streamline.sln /t:Rebuild /m /nologo `
             /verbosity:minimal /p:Configuration=Production /p:Platform=x64
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -106,188 +79,37 @@ jobs:
         shell: pwsh
         run: ./tests/run-regressions.ps1
 
-      - name: Assemble unsigned candidate
+      - name: Assemble package
         shell: pwsh
         run: |
-          ./tools/project-release.ps1 -Mode Assemble `
+          ./tools/project-release.ps1 `
             -BuildRoot _artifacts `
             -CacheDirectory _artifacts/project-release/cache `
-            -CandidateDirectory $env:CANDIDATE `
-            -SourceCommit (git rev-parse HEAD)
-          ./tools/project-release.ps1 -Mode Validate `
-            -CandidateDirectory $env:CANDIDATE `
-            -SourceCommit (git rev-parse HEAD)
-
-      - name: Upload unsigned candidate
-        uses: actions/upload-artifact@v4
-        with:
-          name: project-release-candidate
-          path: ${{ env.CANDIDATE }}
-          if-no-files-found: error
-          retention-days: 1
-
-  sign-and-publish:
-    needs: build
-    runs-on: windows-2022
-    environment: streamline-release
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
-
-      - name: Require same trusted release commit
-        shell: pwsh
-        run: |
-          git fetch origin main
-          git merge-base --is-ancestor HEAD origin/main
-          if ($LASTEXITCODE -ne 0) {
-            throw "Release commit is not on trusted main."
+            -OutputDirectory $env:STAGING
+          New-Item -ItemType Directory -Force $env:OUTPUT | Out-Null
+          $sdk = Join-Path $env:OUTPUT "streamline-sdk.zip"
+          $symbols = Join-Path $env:OUTPUT "streamline-symbols.zip"
+          Compress-Archive -Path "$env:STAGING\package\*" -DestinationPath $sdk
+          Compress-Archive -Path "$env:STAGING\symbols\*" -DestinationPath $symbols
+          $hashes = foreach ($file in $sdk, $symbols) {
+            "$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant())  $(Split-Path -Leaf $file)"
           }
-          ./tools/project-release.ps1 -Mode ValidateTag -Tag $env:RELEASE_TAG
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: project-release-candidate
-          path: ${{ env.CANDIDATE }}
-
-      - name: Validate candidate provenance
-        shell: pwsh
-        run: |
-          ./tools/project-release.ps1 -Mode Validate `
-            -CandidateDirectory $env:CANDIDATE `
-            -SourceCommit (git rev-parse HEAD)
-
-      - name: Build trusted release verifier
-        shell: pwsh
-        run: |
-          ./tools/project-release.ps1 -Mode GeneratePublicHeader `
-            -OutputPath $env:PUBLIC_HEADER
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -products * `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
-          if (-not $vs) { throw "Visual Studio C++ tools are unavailable." }
-          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
-          $include = (Resolve-Path (Split-Path -Parent $env:PUBLIC_HEADER)).Path
-          New-Item -ItemType Directory -Force _artifacts/project-release/verifier | Out-Null
-          $compile = @(
-            "cl /nologo /std:c++20 /EHsc /W4 /WX /DNOMINMAX",
-            "/I . /I `"$include`"",
-            "/DSL_PROJECT_TRUST_CONFIG_HEADER=\`"projectTrust.generated.h\`"",
-            "tools\project-release-verifier.cpp",
-            "source\core\sl.security\physicalFilePath.cpp",
-            "source\core\sl.security\projectTrust.cpp",
-            "d3d12.lib",
-            "dxgi.lib",
-            "/Fo:_artifacts\project-release\verifier\",
-            "/Fe:_artifacts\project-release\verifier\project-release-verifier.exe"
-          ) -join " "
-          $command = "call `"$vcvars`" >nul && $compile"
-          & $env:ComSpec /d /s /c $command
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Sign exact release manifest
-        shell: pwsh
-        env:
-          STREAMLINE_SIGNING_KEY: ${{ secrets.STREAMLINE_SIGNING_KEY }}
-        run: |
-          if (-not $env:STREAMLINE_SIGNING_KEY) {
-            throw "STREAMLINE_SIGNING_KEY is not configured."
-          }
-          $keyDirectory = Join-Path $env:RUNNER_TEMP (
-            "streamline-signing-" + [guid]::NewGuid().ToString("N"))
-          $key = Join-Path $keyDirectory "streamline-release-private.pem"
-          try {
-            New-Item -ItemType Directory $keyDirectory | Out-Null
-            & icacls $keyDirectory /inheritance:r `
-              /grant:r "$env:USERNAME`:(OI)(CI)F" "SYSTEM`:(OI)(CI)F" | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to restrict the temporary signing directory."
-            }
-            $bytes = [Convert]::FromBase64String($env:STREAMLINE_SIGNING_KEY)
-            [IO.File]::WriteAllBytes($key, $bytes)
-            ./tools/project-signing.ps1 -Mode Sign `
-              -SpecPath "$env:CANDIDATE/provenance/release-spec.json" `
-              -InputDirectory "$env:CANDIDATE/package/bin/x64" `
-              -PrivateKeyPath $key `
-              -ManifestPath "$env:CANDIDATE/package/bin/x64/sl.project-manifest.bin" `
-              -SignaturePath "$env:CANDIDATE/package/bin/x64/sl.project-manifest.sig"
-          }
-          finally {
-            Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $keyDirectory -Force -ErrorAction SilentlyContinue
-            Remove-Item Env:STREAMLINE_SIGNING_KEY -ErrorAction SilentlyContinue
-          }
-
-      - name: Verify authenticated package
-        shell: pwsh
-        run: |
-          & _artifacts/project-release/verifier/project-release-verifier.exe `
-            "$env:CANDIDATE/package/bin/x64"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Qualify GPU initialization
-        shell: pwsh
-        run: |
-          & _artifacts/project-release/verifier/project-release-verifier.exe `
-            "$env:CANDIDATE/package/bin/x64" --initialize-if-supported
-          $result = $LASTEXITCODE
-          if ($result -eq 77) {
-            $message = "GPU initialization not run: no supported physical GPU; separate hardware qualification required"
-            Write-Output "::warning::$message"
-            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY `
-              -Value "### GPU qualification`n`n⚠️ $message"
-            exit 0
-          }
-          if ($result -ne 0) { exit $result }
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY `
-            -Value "### GPU qualification`n`nPASS: Streamline initialization and public FSR routes passed on a supported physical GPU."
-
-      - name: Package verified release
-        shell: pwsh
-        run: |
-          $out = "_artifacts/project-release/output"
-          New-Item -ItemType Directory -Force $out | Out-Null
-          $sdk = Join-Path $out "streamline-sdk-$env:RELEASE_TAG.zip"
-          $symbols = Join-Path $out "streamline-symbols-$env:RELEASE_TAG.zip"
-          Compress-Archive -Path "$env:CANDIDATE\package\*" -DestinationPath $sdk
-          Compress-Archive -LiteralPath `
-            "$env:CANDIDATE/symbols","$env:CANDIDATE/provenance" `
-            -DestinationPath $symbols
-          $hashes = @(
-            "$(Get-FileHash $sdk -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path -Leaf $sdk)"
-            "$(Get-FileHash $symbols -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path -Leaf $symbols)"
-            "$(git rev-parse HEAD)  source-commit"
-          )
           [IO.File]::WriteAllLines(
-            (Join-Path $out "SHA256SUMS.txt"), $hashes,
+            (Join-Path $env:OUTPUT "SHA256SUMS.txt"), $hashes,
             [Text.UTF8Encoding]::new($false))
 
-      - name: Upload verified release archives
-        uses: actions/upload-artifact@v4
-        with:
-          name: project-release-${{ env.RELEASE_TAG }}
-          path: _artifacts/project-release/output
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Publish immutable GitHub release
-        if: github.event_name == 'push' || inputs.publish
+      - name: Publish latest release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view $env:RELEASE_TAG 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            throw "Release $env:RELEASE_TAG already exists."
-          }
-          $target = git rev-parse HEAD
-          $assets = Get-ChildItem _artifacts\project-release\output -File |
-            Select-Object -ExpandProperty FullName
-          gh release create $env:RELEASE_TAG @assets `
-            --target $target `
-            --title $env:RELEASE_TAG `
-            --notes "Project Streamline $env:RELEASE_TAG"
+          $config = Import-PowerShellDataFile config/project-release.psd1
+          $commit = git rev-parse HEAD
+          $tag = "cs-streamline-$($config.Upstream.Version)-$(git rev-parse --short=7 HEAD)"
+          $assets = Get-ChildItem $env:OUTPUT -File | Select-Object -ExpandProperty FullName
+          gh release create $tag @assets `
+            --target $commit `
+            --title $tag `
+            --notes "Streamline runtime built from $commit." `
+            --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

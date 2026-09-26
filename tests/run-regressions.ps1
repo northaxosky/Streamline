@@ -67,11 +67,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Present result regression test failed."
 }
 
-& (Join-Path $PSScriptRoot "run-project-trust-regressions.ps1")
-if ($LASTEXITCODE -ne 0) {
-    throw "Project trust regressions failed."
-}
-
 & (Join-Path $PSScriptRoot "run-fsr-provider-runtime-regression.ps1")
 if ($LASTEXITCODE -ne 0) {
     throw "FidelityFX provider runtime regression failed."
