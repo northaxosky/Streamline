@@ -522,8 +522,13 @@ Result slGetData(const BaseStructure* inputs, BaseStructure* output, CommandBuff
             return Result::eErrorFeatureNotSupported;
         }
         const auto& provider = getProvider(ctx, algorithm);
+        // Driver-side providers need the device in null-context queries.
+        ffxCreateBackendDX12Desc backend{
+            { FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12 },
+            ctx.device
+        };
         ffxOverrideVersion overrideVersion{
-            { FFX_API_DESC_TYPE_OVERRIDE_VERSION },
+            { FFX_API_DESC_TYPE_OVERRIDE_VERSION, &backend.header },
             provider.id
         };
         ffxQueryDescUpscaleGetRenderResolutionFromQualityMode query{
