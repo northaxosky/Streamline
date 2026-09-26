@@ -22,15 +22,13 @@
 
 #pragma once
 
-#include "source/core/sl.security/projectTrust.h"
-
 namespace sl
 {
 
 namespace security
 {
 
-HMODULE loadLibrary(const wchar_t* path, TrustFailure* failure = nullptr);
+HMODULE loadLibrary(const wchar_t* path);
 
 }
 
