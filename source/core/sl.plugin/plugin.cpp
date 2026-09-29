@@ -103,7 +103,14 @@ static bool isAppDenylisted(api::Context* ctx)
         return false;
     }
 
-    auto relative = std::filesystem::relative(pluginPath, otaCachePath);
+    std::error_code errorCode;
+    auto relative = std::filesystem::relative(pluginPath, otaCachePath, errorCode);
+    if (errorCode)
+    {
+        SL_LOG_INFO("Failed to get relative path to OTA cache (%s) - denylist does not apply", errorCode.message().c_str());
+        return false;
+    }
+
     if (relative.empty() ||
         (relative.u8string().length() > 1 && relative.u8string()[0] == '.' && relative.u8string()[1] == '.'))
     {
