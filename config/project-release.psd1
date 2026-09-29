@@ -12,13 +12,13 @@
         @{ Name = 'nvngx_dlss.dll'; ArchivePath = 'bin/x64/nvngx_dlss.dll'; Sha256 = '3975567b8943c53acce397f2b72380092f84f162d00b0d2c7d08a1025c563983' }
         @{ Name = 'nvngx_dlssg.dll'; ArchivePath = 'bin/x64/nvngx_dlssg.dll'; Sha256 = 'ff6e90eb78b827927dff5b4ecc6b1c870c2e9bca29ed9f48c7d348cc9e170b82' }
         @{ Name = 'sl.common.dll'; BuildProject = 'sl.common' }
-        @{ Name = 'sl.dlss.dll'; ArchivePath = 'bin/x64/sl.dlss.dll'; Sha256 = '73bf52c0cfaa5900a8f3f4a91306e4625e7cca696dfb305aae44c9f97b582e1f' }
+        @{ Name = 'sl.dlss.dll'; BuildProject = 'sl.dlss' }
         @{ Name = 'sl.dlss_g.dll'; ArchivePath = 'bin/x64/sl.dlss_g.dll'; Sha256 = 'f4a6b2b14dcc0b1485989e430d3b4e3a44ac1800b92ba1ad74f476e64fb2b09c' }
         @{ Name = 'sl.fsr.dll'; BuildProject = 'sl.fsr' }
         @{ Name = 'sl.fsr_g.dll'; BuildProject = 'sl.fsr_g' }
         @{ Name = 'sl.interposer.dll'; BuildProject = 'sl.interposer' }
-        @{ Name = 'sl.pcl.dll'; ArchivePath = 'bin/x64/sl.pcl.dll'; Sha256 = 'f13d51cfa05f4cd514df2026049e2db8adf359221713170ad386fd499915b582' }
-        @{ Name = 'sl.reflex.dll'; ArchivePath = 'bin/x64/sl.reflex.dll'; Sha256 = '0ce9725e3e03ea9e7f81d008b57f33ee365973d2e349131c8b1c3e3378fe2db0' }
+        @{ Name = 'sl.pcl.dll'; BuildProject = 'sl.pcl' }
+        @{ Name = 'sl.reflex.dll'; BuildProject = 'sl.reflex' }
     )
     Licenses = @(
         @{ ArchivePath = 'license.txt'; OutputPath = 'license.txt' }
