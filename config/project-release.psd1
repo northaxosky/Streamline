@@ -1,19 +1,19 @@
 @{
     Upstream = @{
-        Version = 'v2.14.1'
-        Url = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.1/streamline-sdk-v2.14.1.zip'
-        Sha256 = '92c4d954631a1710da86ca3fa8d5034f2b9503838c95fc4ae977ae149319781b'
+        Version = 'v2.14.16'
+        Url = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.16/streamline-sdk-v2.14.16.zip'
+        Sha256 = '32041e51db0cab709a271b72a352281b690c2abbd669a827809401a5dd23956b'
     }
     Runtime = @(
         @{ Name = 'amd_fidelityfx_upscaler_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll'; Sha256 = 'd0dcccc74a43c44ba435b7a369b456e0970d8a4464e4bd683119b374f2c9fb46' }
         @{ Name = 'amd_fidelityfx_framegeneration_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_dx12.dll'; Sha256 = '02297beedd285e822d3a64f314cf00faf378dcec0edc47ff0c4dd71b3a8c2f18' }
         @{ Name = 'cs_fidelityfx_upscaler_dx12.dll'; BuildProject = 'cs_fidelityfx_upscaler_dx12'; SymbolName = 'cs_fidelityfx_upscaler_dx12.pdb' }
         @{ Name = 'cs_fidelityfx_framegeneration_dx12.dll'; BuildProject = 'cs_fidelityfx_framegeneration_dx12'; SymbolName = 'cs_fidelityfx_framegeneration_dx12.pdb' }
-        @{ Name = 'nvngx_dlss.dll'; ArchivePath = 'bin/x64/nvngx_dlss.dll'; Sha256 = '3975567b8943c53acce397f2b72380092f84f162d00b0d2c7d08a1025c563983' }
-        @{ Name = 'nvngx_dlssg.dll'; ArchivePath = 'bin/x64/nvngx_dlssg.dll'; Sha256 = 'ff6e90eb78b827927dff5b4ecc6b1c870c2e9bca29ed9f48c7d348cc9e170b82' }
+        @{ Name = 'nvngx_dlss.dll'; ArchivePath = 'bin/x64/nvngx_dlss.dll'; Sha256 = 'd00b5b0ab29c3ca101b70c3a5ecb3a01b7ef33766a3383a28a18623083e6123e' }
+        @{ Name = 'nvngx_dlssg.dll'; ArchivePath = 'bin/x64/nvngx_dlssg.dll'; Sha256 = '8d59d49b36410dd6b62fef2503a5871d347415bd85d943fa0848563a95dd50c7' }
         @{ Name = 'sl.common.dll'; BuildProject = 'sl.common' }
         @{ Name = 'sl.dlss.dll'; BuildProject = 'sl.dlss' }
-        @{ Name = 'sl.dlss_g.dll'; ArchivePath = 'bin/x64/sl.dlss_g.dll'; Sha256 = 'f4a6b2b14dcc0b1485989e430d3b4e3a44ac1800b92ba1ad74f476e64fb2b09c' }
+        @{ Name = 'sl.dlss_g.dll'; ArchivePath = 'bin/x64/sl.dlss_g.dll'; Sha256 = '3ed9538df724993bea8a050195a6a78b9c8c8a566d5b05ade477aab3c390e90f' }
         @{ Name = 'sl.fsr.dll'; BuildProject = 'sl.fsr' }
         @{ Name = 'sl.fsr_g.dll'; BuildProject = 'sl.fsr_g' }
         @{ Name = 'sl.interposer.dll'; BuildProject = 'sl.interposer' }
