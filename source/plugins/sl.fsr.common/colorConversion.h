@@ -29,10 +29,12 @@
 namespace sl::fsr
 {
 
-inline uint32_t getUpscaleColorCreateFlags(FSRColorSpace colorSpace)
+inline uint32_t getUpscaleColorCreateFlags(
+    FSRColorSpace colorSpace,
+    bool colorBuffersHDR)
 {
     uint32_t flags{};
-    if (colorSpace == FSRColorSpace::ePQ)
+    if (colorBuffersHDR || colorSpace == FSRColorSpace::ePQ)
     {
         flags |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
     }

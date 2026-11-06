@@ -92,7 +92,7 @@ enum class FSRD3D12RuntimeSource : uint32_t
 };
 
 // {DA762981-E158-4E5E-96CC-BF16BAAF369C}
-SL_STRUCT_BEGIN(FSROptions, StructType({ 0xda762981, 0xe158, 0x4e5e, { 0x96, 0xcc, 0xbf, 0x16, 0xba, 0xaf, 0x36, 0x9c } }), kStructVersion1)
+SL_STRUCT_BEGIN(FSROptions, StructType({ 0xda762981, 0xe158, 0x4e5e, { 0x96, 0xcc, 0xbf, 0x16, 0xba, 0xaf, 0x36, 0x9c } }), kStructVersion2)
     FSRMode mode = FSRMode::eOff;
     uint32_t outputWidth = INVALID_UINT;
     uint32_t outputHeight = INVALID_UINT;
@@ -108,6 +108,10 @@ SL_STRUCT_BEGIN(FSROptions, StructType({ 0xda762981, 0xe158, 0x4e5e, { 0x96, 0xc
     FSRColorSpace colorSpace = FSRColorSpace::eSRGB;
     Boolean useAutoExposure = Boolean::eFalse;
     Boolean dynamicResolutionEnabled = Boolean::eFalse;
+    // kStructVersion2
+    //! Specifies if tagged color buffers hold HDR values above 1.0. ePQ
+    //! always implies it; set it for linear pre-tonemap scene color.
+    Boolean colorBuffersHDR = Boolean::eFalse;
 SL_STRUCT_END()
 
 //! Optional structure chained to FSROptions. Omit it to retain FSR 3 behavior.

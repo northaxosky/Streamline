@@ -188,8 +188,12 @@ uint32_t getCreateFlags(
         usesGamma22Adapter(algorithm, options.colorSpace) ?
             FSRColorSpace::eLinear :
             options.colorSpace;
-    uint32_t flags =
-        fsr::getUpscaleColorCreateFlags(providerColorSpace);
+    const bool colorBuffersHDR =
+        options.structVersion >= kStructVersion2 &&
+        options.colorBuffersHDR == Boolean::eTrue;
+    uint32_t flags = fsr::getUpscaleColorCreateFlags(
+        providerColorSpace,
+        colorBuffersHDR);
     if (options.useAutoExposure == Boolean::eTrue) flags |= FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
     if (options.dynamicResolutionEnabled == Boolean::eTrue) flags |= FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION;
     if (constants.depthInverted == Boolean::eTrue) flags |= FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
