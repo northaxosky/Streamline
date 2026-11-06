@@ -5,6 +5,7 @@
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_color.h"
 #include "external/fidelityfx-sdk/Kits/FidelityFX/upscalers/include/ffx_upscale.h"
 #include "source/plugins/sl.fsr.common/colorConversion.h"
+#include "source/plugins/sl.fsr.common/frameGenerationFlags.h"
 #include "source/plugins/sl.fsr.common/jitter.h"
 #include "source/plugins/sl.fsr.common/providerCapabilities.h"
 
@@ -494,6 +495,30 @@ bool validatesColorContract(ID3D12Device* device, const wchar_t* shaderPath)
             FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE &&
         gammaTransfer ==
             FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2;
+    sl::FSRGOptions uiOptions{};
+    const bool frameGenerationFlagsValid =
+        sl::fsr::getFrameGenerationColorCreateFlags(
+            sl::FSRColorSpace::ePQ) ==
+            FFX_FRAMEGENERATION_ENABLE_HIGH_DYNAMIC_RANGE &&
+        sl::fsr::getFrameGenerationColorCreateFlags(
+            sl::FSRColorSpace::eLinear) ==
+            FFX_FRAMEGENERATION_ENABLE_HIGH_DYNAMIC_RANGE &&
+        sl::fsr::getFrameGenerationColorCreateFlags(
+            sl::FSRColorSpace::eSRGB) == 0 &&
+        sl::fsr::getFrameGenerationColorCreateFlags(
+            sl::FSRColorSpace::eGamma22) == 0 &&
+        sl::fsr::getUiCompositionFlags(uiOptions) == 0 &&
+        [&]
+        {
+            uiOptions.uiPremultipliedAlpha = sl::Boolean::eTrue;
+            uiOptions.uiDoubleBuffering = sl::Boolean::eTrue;
+            const bool both =
+                sl::fsr::getUiCompositionFlags(uiOptions) ==
+                (FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_USE_PREMUL_ALPHA |
+                 FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING);
+            uiOptions.structVersion = sl::kStructVersion1;
+            return both && sl::fsr::getUiCompositionFlags(uiOptions) == 0;
+        }();
     uint32_t officialUpscaleFlags{};
     uint32_t officialFrameGenerationTransfer{};
     const bool officialLinearMappingValid =
@@ -520,6 +545,7 @@ bool validatesColorContract(ID3D12Device* device, const wchar_t* shaderPath)
     ColorResults gamma{};
     ColorResults srgb{};
     if (!projectFsr3MappingsValid ||
+        !frameGenerationFlagsValid ||
         !officialLinearMappingValid ||
         !runColorTransfer(
             device,
