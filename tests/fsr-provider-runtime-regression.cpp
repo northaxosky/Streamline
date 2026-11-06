@@ -486,8 +486,12 @@ bool validatesColorContract(ID3D12Device* device, const wchar_t* shaderPath)
         hasProjectGammaTransfer &&
         gammaDispatch == FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_GAMMA_2_2 &&
         srgbDispatch == FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB &&
-        sl::fsr::getUpscaleColorCreateFlags(sl::FSRColorSpace::eGamma22) ==
+        sl::fsr::getUpscaleColorCreateFlags(
+            sl::FSRColorSpace::eGamma22, false) ==
             FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE &&
+        sl::fsr::getUpscaleColorCreateFlags(
+            sl::FSRColorSpace::eLinear, true) ==
+            FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE &&
         gammaTransfer ==
             FFX_API_BACKBUFFER_TRANSFER_FUNCTION_GAMMA_2_2;
     uint32_t officialUpscaleFlags{};
