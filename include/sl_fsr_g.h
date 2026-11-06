@@ -57,7 +57,7 @@ enum class FSRGCompletionMode : uint32_t
 };
 
 // {BDE29A5F-0E62-4506-9196-5E61310C08BD}
-SL_STRUCT_BEGIN(FSRGOptions, StructType({ 0xbde29a5f, 0xe62, 0x4506, { 0x91, 0x96, 0x5e, 0x61, 0x31, 0xc, 0x8, 0xbd } }), kStructVersion1)
+SL_STRUCT_BEGIN(FSRGOptions, StructType({ 0xbde29a5f, 0xe62, 0x4506, { 0x91, 0x96, 0x5e, 0x61, 0x31, 0xc, 0x8, 0xbd } }), kStructVersion2)
     FSRGMode mode = FSRGMode::eOff;
     uint32_t displayWidth = INVALID_UINT;
     uint32_t displayHeight = INVALID_UINT;
@@ -71,6 +71,14 @@ SL_STRUCT_BEGIN(FSRGOptions, StructType({ 0xbde29a5f, 0xe62, 0x4506, { 0x91, 0x9
     float frameTimeDeltaMilliseconds{};
     float viewSpaceToMetersFactor = 1.0f;
     Boolean onlyPresentGenerated = Boolean::eFalse;
+    // kStructVersion2
+    //! Specifies if the tagged UI color buffer holds premultiplied alpha.
+    Boolean uiPremultipliedAlpha = Boolean::eFalse;
+    //! Specifies if the swapchain should double-buffer the tagged UI buffer.
+    Boolean uiDoubleBuffering = Boolean::eFalse;
+    //! Display luminance range in nits for HDR color spaces. Zero is unset.
+    float minLuminance{};
+    float maxLuminance{};
 SL_STRUCT_END()
 
 //! Optional structure chained to FSRGOptions. Omit it to retain FSR 3 behavior.

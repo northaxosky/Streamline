@@ -47,6 +47,7 @@
 #include "source/plugins/sl.fsr.common/colorConversionD3D12.h"
 #include "source/plugins/sl.fsr.common/evaluation.h"
 #include "source/plugins/sl.fsr.common/ffxRuntime.h"
+#include "source/plugins/sl.fsr.common/frameGenerationFlags.h"
 #include "source/plugins/sl.fsr.common/jitter.h"
 #include "source/plugins/sl.fsr.common/providerCapabilities.h"
 #include "source/plugins/sl.fsr_g/versions.h"
@@ -211,9 +212,14 @@ ID3D12GraphicsCommandList* getNativeCommandList(
     return static_cast<ID3D12GraphicsCommandList*>(commandList);
 }
 
-uint32_t getCreateFlags(const Constants& constants, FfxApiDimensions2D renderSize, FfxApiDimensions2D motionSize)
+uint32_t getCreateFlags(
+    const FSRGOptions& options,
+    const Constants& constants,
+    FfxApiDimensions2D renderSize,
+    FfxApiDimensions2D motionSize)
 {
     uint32_t flags{ FFX_FRAMEGENERATION_ENABLE_ASYNC_WORKLOAD_SUPPORT };
+    flags |= fsr::getFrameGenerationColorCreateFlags(options.colorSpace);
     if (constants.depthInverted == Boolean::eTrue) flags |= FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED;
     if (constants.cameraFar == 0.0f) flags |= FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE;
     if (constants.motionVectorsJittered == Boolean::eTrue) flags |= FFX_FRAMEGENERATION_ENABLE_MOTION_VECTORS_JITTER_CANCELLATION;
@@ -281,9 +287,26 @@ void destroyViewport(fsr_g::Context& ctx, fsr_g::Viewport& viewport)
     releaseConversionFrames(ctx, viewport);
 }
 
+void unregisterUiResource(fsr_g::Context& ctx)
+{
+    if (!ctx.swapchainContext) return;
+    ffxConfigureDescFrameGenerationSwapChainRegisterUiResourceDX12 clear{
+        { FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_REGISTERUIRESOURCE_DX12 },
+        FfxApiResource{},
+        0
+    };
+    if (ctx.legacyRuntime.configure(
+            &ctx.swapchainContext,
+            &clear.header) != FFX_API_RETURN_OK)
+    {
+        SL_LOG_ERROR("Failed to unregister the FSR frame-generation UI resource");
+    }
+}
+
 void destroySwapchainContext(fsr_g::Context& ctx)
 {
     if (!ctx.swapchainContext) return;
+    unregisterUiResource(ctx);
     waitForPresents(ctx);
     if (ctx.legacyRuntime.destroy(&ctx.swapchainContext) != FFX_API_RETURN_OK)
     {
@@ -314,7 +337,7 @@ bool ensureFrameGenerationContext(
     {
         return false;
     }
-    const uint32_t flags = getCreateFlags(constants, renderSize, motionSize);
+    const uint32_t flags = getCreateFlags(options, constants, renderSize, motionSize);
     const auto providerBackBufferFormat =
         usesGamma22Adapter(viewport.algorithm, options.colorSpace) ?
             DXGI_FORMAT_R16G16B16A16_FLOAT :
@@ -533,6 +556,11 @@ ffxReturnCode_t frameGenerationCallback(ffxDispatchDescFrameGeneration* desc, vo
     {
         return FFX_API_RETURN_ERROR_PARAMETER;
     }
+    if (viewport->options.structVersion >= kStructVersion2)
+    {
+        desc->minMaxLuminance[0] = viewport->options.minLuminance;
+        desc->minMaxLuminance[1] = viewport->options.maxLuminance;
+    }
     const auto result =
         getAlgorithmRuntime(ctx, viewport->algorithm).dispatch(
         &viewport->context,
@@ -663,7 +691,7 @@ Result fsrGPrepare(chi::CommandList commandList, const common::EventData& event,
     ffxConfigureDescFrameGenerationSwapChainRegisterUiResourceDX12 uiConfig{
         { FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_REGISTERUIRESOURCE_DX12 },
         ui ? fsr::getResource(static_cast<ID3D12Resource*>(ui.getNative()), static_cast<D3D12_RESOURCE_STATES>(ui.getState())) : FfxApiResource{},
-        0
+        ui ? fsr::getUiCompositionFlags(*options) : 0u
     };
     if (ctx.legacyRuntime.configure(
             &ctx.swapchainContext,
@@ -954,6 +982,7 @@ Result slFSRGQuiesce()
 {
     auto& ctx = *fsr_g::getContext();
     std::scoped_lock lock(ctx.mutex);
+    unregisterUiResource(ctx);
     for (auto& [id, viewport] : ctx.viewports) destroyViewport(ctx, viewport);
     ctx.viewports.clear();
     waitForPresents(ctx);
