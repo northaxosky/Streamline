@@ -556,11 +556,10 @@ ffxReturnCode_t frameGenerationCallback(ffxDispatchDescFrameGeneration* desc, vo
     {
         return FFX_API_RETURN_ERROR_PARAMETER;
     }
-    if (viewport->options.structVersion >= kStructVersion2)
-    {
-        desc->minMaxLuminance[0] = viewport->options.minLuminance;
-        desc->minMaxLuminance[1] = viewport->options.maxLuminance;
-    }
+    fsr::applyFrameGenerationLuminance(
+        viewport->options,
+        convertGamma22,
+        desc->minMaxLuminance);
     const auto result =
         getAlgorithmRuntime(ctx, viewport->algorithm).dispatch(
         &viewport->context,

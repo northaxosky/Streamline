@@ -54,4 +54,25 @@ inline uint32_t getUiCompositionFlags(const FSRGOptions& options)
     return flags;
 }
 
+// FFX normalizes scRGB as (v - min/80) / ((max - min)/80); {0, 0} yields inf.
+inline void applyFrameGenerationLuminance(
+    const FSRGOptions& options,
+    bool convertedGamma22,
+    float (&minMaxLuminance)[2])
+{
+    if (convertedGamma22)
+    {
+        // Decoded SDR linear has 1.0 as white; scRGB defines 1.0 as 80 nits.
+        minMaxLuminance[0] = 0.0f;
+        minMaxLuminance[1] = 80.0f;
+    }
+    else if (
+        options.structVersion >= kStructVersion2 &&
+        options.maxLuminance > options.minLuminance)
+    {
+        minMaxLuminance[0] = options.minLuminance;
+        minMaxLuminance[1] = options.maxLuminance;
+    }
+}
+
 }

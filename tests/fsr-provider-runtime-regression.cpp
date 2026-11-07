@@ -519,6 +519,37 @@ bool validatesColorContract(ID3D12Device* device, const wchar_t* shaderPath)
             uiOptions.structVersion = sl::kStructVersion1;
             return both && sl::fsr::getUiCompositionFlags(uiOptions) == 0;
         }();
+    const bool frameGenerationLuminanceValid = []
+    {
+        constexpr float kSentinel[2]{-1.0f, -2.0f};
+        sl::FSRGOptions options{};
+        float range[2]{kSentinel[0], kSentinel[1]};
+        sl::fsr::applyFrameGenerationLuminance(options, true, range);
+        const bool gammaRange = range[0] == 0.0f && range[1] == 80.0f;
+        // FFX: (v - min/80) / ((max - min)/80) must map SDR white to 1.0.
+        const float normalizedWhite =
+            (1.0f - range[0] / 80.0f) / ((range[1] - range[0]) / 80.0f);
+
+        range[0] = kSentinel[0];
+        range[1] = kSentinel[1];
+        sl::fsr::applyFrameGenerationLuminance(options, false, range);
+        const bool unsetKept =
+            range[0] == kSentinel[0] && range[1] == kSentinel[1];
+
+        options.minLuminance = 0.5f;
+        options.maxLuminance = 1000.0f;
+        sl::fsr::applyFrameGenerationLuminance(options, false, range);
+        const bool clientRange = range[0] == 0.5f && range[1] == 1000.0f;
+
+        options.structVersion = sl::kStructVersion1;
+        range[0] = kSentinel[0];
+        range[1] = kSentinel[1];
+        sl::fsr::applyFrameGenerationLuminance(options, false, range);
+        const bool legacyKept =
+            range[0] == kSentinel[0] && range[1] == kSentinel[1];
+        return gammaRange && normalizedWhite == 1.0f && unsetKept &&
+               clientRange && legacyKept;
+    }();
     uint32_t officialUpscaleFlags{};
     uint32_t officialFrameGenerationTransfer{};
     const bool officialLinearMappingValid =
@@ -546,6 +577,7 @@ bool validatesColorContract(ID3D12Device* device, const wchar_t* shaderPath)
     ColorResults srgb{};
     if (!projectFsr3MappingsValid ||
         !frameGenerationFlagsValid ||
+        !frameGenerationLuminanceValid ||
         !officialLinearMappingValid ||
         !runColorTransfer(
             device,
