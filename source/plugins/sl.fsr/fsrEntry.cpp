@@ -628,7 +628,7 @@ bool slOnPluginStartup(const char* jsonConfig, void* device)
         !ctx.fsr3Runtime.selectProvider(
             FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
             ctx.device,
-            "3.1.5",
+            "3.1.6",
             ctx.fsr3Provider))
     {
         return false;
@@ -640,7 +640,7 @@ bool slOnPluginStartup(const char* jsonConfig, void* device)
         ctx.fsr4Runtime.selectProvider(
             FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
             ctx.device,
-            "4.1.1",
+            "4.1.2",
             ctx.fsr4Provider,
             false);
     ctx.fsr4UnavailableReason =

@@ -56,9 +56,9 @@ enum class FSRColorSpace : uint32_t
 //! FidelityFX upscaling implementation selected for this viewport.
 enum class FSRAlgorithm : uint32_t
 {
-    //! Source-built FSR 3.1.5 provider.
+    //! Source-built FSR 3.1.6 provider.
     eFSR3,
-    //! Official signed FSR 4.1.1 machine-learning provider.
+    //! Official signed FSR 4.1.2 machine-learning provider.
     eFSR4,
     eCount
 };

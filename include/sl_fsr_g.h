@@ -41,7 +41,7 @@ enum class FSRGAlgorithm : uint32_t
 {
     //! Source-built FSR 3.1.6 frame-generation provider.
     eFSR3,
-    //! Official signed FSR 4.0.1 machine-learning frame-generation provider.
+    //! Official signed FSR 4.0.2 machine-learning frame-generation provider.
     eFSR4,
     eCount
 };

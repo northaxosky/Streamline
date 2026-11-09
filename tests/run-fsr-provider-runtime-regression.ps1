@@ -9,16 +9,16 @@ $officialUpscaler = Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\sig
 $officialFrameGeneration = Join-Path $root "external\fidelityfx-sdk\Kits\FidelityFX\signedbin\amd_fidelityfx_framegeneration_dx12.dll"
 $colorAdapterShader = Join-Path $root "_artifacts\shaders\fsr_color_conversion.cs"
 $sdk = Join-Path $root "external\fidelityfx-sdk"
-$sdkCommit = "60f4ea81909200d8542eca14dccb2628b763a9a3"
+$sdkCommit = "7539ae8b6568ad29ed78a753404351daf3b5cca7"
 $rawUpscale = (git -C $sdk show "${sdkCommit}:Kits/FidelityFX/upscalers/include/ffx_upscale.h") -join "`n"
 if ($LASTEXITCODE -ne 0 -or
     $rawUpscale -notmatch "FFX_UPSCALER_VERSION_MAJOR 4" -or
     $rawUpscale -notmatch "FFX_UPSCALER_VERSION_MINOR 1" -or
-    $rawUpscale -notmatch "FFX_UPSCALER_VERSION_PATCH 1" -or
+    $rawUpscale -notmatch "FFX_UPSCALER_VERSION_PATCH 2" -or
     $rawUpscale -notmatch "FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB = \(1 << 1\)" -or
     $rawUpscale -notmatch "FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_PQ   = \(1 << 2\)" -or
     $rawUpscale -match "GAMMA_2_2") {
-    throw "Pinned unmodified FSR 4.1.1 color API does not match the expected sRGB/PQ-only contract."
+    throw "Pinned unmodified FSR 4.1.2 color API does not match the expected sRGB/PQ-only contract."
 }
 $rawApiTypes = (git -C $sdk show "${sdkCommit}:Kits/FidelityFX/api/include/ffx_api_types.h") -join "`n"
 if ($LASTEXITCODE -ne 0 -or
@@ -32,9 +32,9 @@ $rawFrameGeneration = (git -C $sdk show "${sdkCommit}:Kits/FidelityFX/framegener
 if ($LASTEXITCODE -ne 0 -or
     $rawFrameGeneration -notmatch "FFX_FRAMEGENERATION_VERSION_MAJOR 4" -or
     $rawFrameGeneration -notmatch "FFX_FRAMEGENERATION_VERSION_MINOR 0" -or
-    $rawFrameGeneration -notmatch "FFX_FRAMEGENERATION_VERSION_PATCH 1" -or
+    $rawFrameGeneration -notmatch "FFX_FRAMEGENERATION_VERSION_PATCH 2" -or
     $rawFrameGeneration -notmatch "backbufferTransferFunction") {
-    throw "Pinned unmodified MLFG 4.0.1 public dispatch contract was not found."
+    throw "Pinned unmodified MLFG 4.0.2 public dispatch contract was not found."
 }
 $compiler = Get-Command cl.exe -ErrorAction SilentlyContinue
 if (-not $compiler) {

@@ -1083,7 +1083,7 @@ bool slOnPluginStartup(const char* jsonConfig, void* device)
         ctx.mlRuntime.selectProvider(
             FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION,
             ctx.device,
-            "4.0.1",
+            "4.0.2",
             ctx.fsr4FrameGenerationProvider,
             false);
     ctx.fsr4UnavailableReason =

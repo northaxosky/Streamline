@@ -4,11 +4,11 @@ This fork exposes native D3D12 FSR Super Resolution and Frame Generation as
 `sl::kFeatureFSR` and `sl::kFeatureFSR_G`. Their public ABI is declared in
 `sl_fsr.h` and `sl_fsr_g.h`.
 
-The default remains the source-built FSR 3 path: FSR Upscaling 3.1.5, Frame
+The default remains the source-built FSR 3 path: FSR Upscaling 3.1.6, Frame
 Generation 3.1.6, and the patched Frame Generation Swapchain 3.1.7. Chain
 `FSRAlgorithmOptions` or `FSRGAlgorithmOptions` to the existing options
-structure to request the official signed FSR Upscaling 4.1.1 or FSR Frame
-Generation 4.0.1 provider. Omitting the algorithm structure selects FSR 3 and
+structure to request the official signed FSR Upscaling 4.1.2 or FSR Frame
+Generation 4.0.2 provider. Omitting the algorithm structure selects FSR 3 and
 preserves the original ABI.
 
 Call `slFSRGetCapabilities` or `slFSRGGetCapabilities` before changing the
@@ -67,24 +67,24 @@ The pinned SDK identifies the signed algorithms and their public ABI in these
 exact-revision anchors:
 
 * `Kits/FidelityFX/docs/techniques/super-resolution-ml.md` identifies FSR
-  Upscaling 4.1.1, requires the signed binary distribution, and directs
+  Upscaling 4.1.2, requires the signed binary distribution, and directs
   non-linear inputs through the public upscale API.
 * The
-  [unmodified 4.1.1 upscale header](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/60f4ea81909200d8542eca14dccb2628b763a9a3/Kits/FidelityFX/upscalers/include/ffx_upscale.h)
+  [unmodified 4.1.2 upscale header](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/upscalers/include/ffx_upscale.h)
   defines only the official sRGB and PQ non-linear dispatch flags.
 * The
-  [unmodified ML frame-generation guide](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/60f4ea81909200d8542eca14dccb2628b763a9a3/Kits/FidelityFX/docs/techniques/frame-interpolation-ml.md)
-  identifies Frame Generation 4.0.1, requires the public configure,
+  [unmodified ML frame-generation guide](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/docs/techniques/frame-interpolation-ml.md)
+  identifies Frame Generation 4.0.2, requires the public configure,
   `PrepareV2`, and generation-dispatch sequence, lists only optional sRGB/PQ
   conversion, and reserves additional color spaces for future support.
 * The
-  [unmodified 4.0.1 frame-generation header](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/60f4ea81909200d8542eca14dccb2628b763a9a3/Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h)
+  [unmodified 4.0.2 frame-generation header](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h)
   uses `FfxApiBackbufferTransferFunction`; the
-  [unmodified public API types](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/60f4ea81909200d8542eca14dccb2628b763a9a3/Kits/FidelityFX/api/include/ffx_api_types.h)
+  [unmodified public API types](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/api/include/ffx_api_types.h)
   define only sRGB, PQ, and scRGB values.
 
 The prepared SDK in this repository is intentionally patched. The tracked
-`patches/fidelityfx-sdk-2.3.0-fg-completion.patch` adds the pure Gamma 2.2
+`patches/fidelityfx-sdk-2.4.0-fg-completion.patch` adds the pure Gamma 2.2
 upscale flag and frame-generation transfer value together with the matching
 source-built FSR 3 shader conversions. Those additions are project ABI for the
 `cs_fidelityfx_*` providers only. The official ML adapter never sends those
@@ -100,7 +100,7 @@ with a complete `ffxDispatchDescFrameGeneration`, and that the callback calls
 `ffxDispatch` on its algorithm context. The source-built 3.1.7 swapchain stores
 the same public callback type in
 `framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.h`; it does not
-inspect or own the official 4.0.1 algorithm context. This is why the callback
+inspect or own the official 4.0.2 algorithm context. This is why the callback
 can dispatch through the official module's function table while the
 project-built swapchain remains the presentation and completion owner.
 
@@ -191,7 +191,7 @@ The frame sequence is:
    composition, and final presentation asynchronously.
 
 ML frame generation uses the same patched source-built swapchain and the
-official signed 4.0.1 algorithm context. Its required order is configure,
+official signed 4.0.2 algorithm context. Its required order is configure,
 `ffxDispatchDescFrameGenerationPrepareV2`, then the algorithm dispatch invoked
 by the swapchain during `Present`. `PrepareV2` includes the validated camera
 position and full up/right/forward basis, vertical FOV in radians, near/far
@@ -232,13 +232,13 @@ FSR Upscaling 4 requires a supported AMD RX 7000-series discrete GPU, RX
 9000-series GPU, or later supported hardware. FSR Frame Generation 4 requires
 Windows 11, an RX 9000-series GPU or later, and a DirectX 12 Agility SDK/runtime
 that supports Shader Model 6.6 (the vendor documentation specifies Agility SDK
-1.4.9 or later). The pinned SDK 2.3.0 sample uses Agility SDK 1.616.1 and
+1.4.9 or later). The pinned SDK 2.4.0 sample uses Agility SDK 1.616.1 and
 `D3D12SDKVersion` 616.
 
 The plugin does not enable ML algorithms from PCI identification alone. It
 checks the documented OS requirement and the actual device's Shader Model 6.6
-support, then asks the official provider module to enumerate the exact 4.1.1
-or 4.0.1 version for that `ID3D12Device`. PCI identification is used only to
+support, then asks the official provider module to enumerate the exact 4.1.2
+or 4.0.2 version for that `ID3D12Device`. PCI identification is used only to
 classify a failed provider query. Context creation is pinned to the enumerated
 provider ID and validated by querying the created context. An unsupported
 adapter such as an RTX 4090 keeps FSR 3 and DLSS available and reports

@@ -1968,7 +1968,7 @@ int wmain(int argc, wchar_t** argv)
             upscalerApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
             device.Get(),
-            "3.1.5",
+            "3.1.6",
             &upscalerVersionId) &&
         findVersion(
             frameGenerationApi.query,
@@ -1992,14 +1992,14 @@ int wmain(int argc, wchar_t** argv)
             officialUpscalerApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
             device.Get(),
-            "4.1.1");
+            "4.1.2");
     const bool mlfgAvailable =
         providersValid &&
         findVersion(
             officialFrameGenerationApi.query,
             FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION,
             device.Get(),
-            "4.0.1");
+            "4.0.2");
     const auto fsr4UnavailableReason =
         sl::fsr::getMachineLearningUnavailableReason(
             device.Get(),
