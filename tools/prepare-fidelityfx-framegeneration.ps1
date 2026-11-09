@@ -42,8 +42,8 @@ if (-not $ShortPath -and $root.Length -gt 80) {
     }
 }
 
-$expectedCommit = "60f4ea81909200d8542eca14dccb2628b763a9a3"
-$patch = Join-Path $root "patches\fidelityfx-sdk-2.3.0-fg-completion.patch"
+$expectedCommit = "7539ae8b6568ad29ed78a753404351daf3b5cca7"
+$patch = Join-Path $root "patches\fidelityfx-sdk-2.4.0-fg-completion.patch"
 $buildRoot = Join-Path $root "_artifacts\fidelityfx-sdk-build"
 $archive = Join-Path $buildRoot "FidelityFX-SDK-v1.1.4.zip"
 $toolRoot = Join-Path $buildRoot "sdk-1.1.4"

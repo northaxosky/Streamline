@@ -5,8 +5,8 @@
         Sha256 = '32041e51db0cab709a271b72a352281b690c2abbd669a827809401a5dd23956b'
     }
     Runtime = @(
-        @{ Name = 'amd_fidelityfx_upscaler_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll'; Sha256 = 'd0dcccc74a43c44ba435b7a369b456e0970d8a4464e4bd683119b374f2c9fb46' }
-        @{ Name = 'amd_fidelityfx_framegeneration_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_dx12.dll'; Sha256 = '02297beedd285e822d3a64f314cf00faf378dcec0edc47ff0c4dd71b3a8c2f18' }
+        @{ Name = 'amd_fidelityfx_upscaler_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll'; Sha256 = 'aad4fccccb29084a655f9a4f9f613bd22c8c03fb4a0f8840148cc6543b4ccace' }
+        @{ Name = 'amd_fidelityfx_framegeneration_dx12.dll'; SourcePath = 'external/fidelityfx-sdk/Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_dx12.dll'; Sha256 = 'e6843252f58b0341a0d80f6a20bc0d840643ee95bc48c22cac08745344577bb6' }
         @{ Name = 'cs_fidelityfx_upscaler_dx12.dll'; BuildProject = 'cs_fidelityfx_upscaler_dx12'; SymbolName = 'cs_fidelityfx_upscaler_dx12.pdb' }
         @{ Name = 'cs_fidelityfx_framegeneration_dx12.dll'; BuildProject = 'cs_fidelityfx_framegeneration_dx12'; SymbolName = 'cs_fidelityfx_framegeneration_dx12.pdb' }
         @{ Name = 'nvngx_dlss.dll'; ArchivePath = 'bin/x64/nvngx_dlss.dll'; Sha256 = 'd00b5b0ab29c3ca101b70c3a5ecb3a01b7ef33766a3383a28a18623083e6123e' }
