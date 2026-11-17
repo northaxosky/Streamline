@@ -267,16 +267,31 @@ void releaseConversionFrames(
     viewport.conversionFrames.clear();
 }
 
+void disableFrameGeneration(fsr_g::Context& ctx, fsr_g::Viewport& viewport)
+{
+    ffxConfigureDescFrameGeneration disable{{ FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION }};
+    disable.swapChain = ctx.swapchain;
+    disable.frameGenerationEnabled = false;
+    disable.allowAsyncWorkloads = false;
+    getAlgorithmRuntime(ctx, viewport.algorithm).configure(
+        &viewport.context,
+        &disable.header);
+}
+
+// Off keeps the context: recorded command lists may still reference it.
+void pauseViewport(fsr_g::Context& ctx, fsr_g::Viewport& viewport)
+{
+    if (viewport.options.mode == FSRGMode::eOff) return;
+    viewport.options.mode = FSRGMode::eOff;
+    if (viewport.context) disableFrameGeneration(ctx, viewport);
+}
+
 void destroyViewport(fsr_g::Context& ctx, fsr_g::Viewport& viewport)
 {
     if (viewport.context)
     {
-        ffxConfigureDescFrameGeneration disable{{ FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION }};
-        disable.swapChain = ctx.swapchain;
-        disable.frameGenerationEnabled = false;
-        disable.allowAsyncWorkloads = false;
+        disableFrameGeneration(ctx, viewport);
         auto& runtime = getAlgorithmRuntime(ctx, viewport.algorithm);
-        runtime.configure(&viewport.context, &disable.header);
         waitForPresents(ctx);
         if (runtime.destroy(&viewport.context) != FFX_API_RETURN_OK)
         {
@@ -887,11 +902,7 @@ Result slSetData(const BaseStructure* inputs, CommandBuffer*)
     if (options->mode == FSRGMode::eOff)
     {
         auto it = ctx.viewports.find(*viewport);
-        if (it != ctx.viewports.end())
-        {
-            destroyViewport(ctx, it->second);
-            ctx.viewports.erase(it);
-        }
+        if (it != ctx.viewports.end()) pauseViewport(ctx, it->second);
     }
     return Result::eOk;
 }
@@ -925,7 +936,12 @@ Result slGetData(const BaseStructure* inputs, BaseStructure* output, CommandBuff
     state->swapchainVersionMajor = ctx.swapchainProvider.major;
     state->swapchainVersionMinor = ctx.swapchainProvider.minor;
     state->swapchainVersionPatch = ctx.swapchainProvider.patch;
-    state->active = it != ctx.viewports.end() && it->second.context ? Boolean::eTrue : Boolean::eFalse;
+    state->active =
+        it != ctx.viewports.end() &&
+        it->second.context &&
+        it->second.options.mode != FSRGMode::eOff ?
+            Boolean::eTrue :
+            Boolean::eFalse;
     state->completionMode = FSRGCompletionMode::eNone;
     state->completionFence = nullptr;
     state->completionFenceValue = 0;

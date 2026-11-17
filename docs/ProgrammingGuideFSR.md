@@ -30,8 +30,8 @@ documented runtime checks and exact provider enumeration succeed. When the
 official algorithm is unavailable, `available` is false, the reason identifies
 the failed admission stage, and provider version fields remain zero if the
 exact provider was not returned. In `FSRGState`, `active` means that a viewport
-algorithm context currently exists; it does not replace the availability
-result. Before viewport activation, state reports the selected/default
+algorithm context exists and generation is not off; it does not replace the
+availability result. Before viewport activation, state reports the selected/default
 algorithm and its current admission result.
 
 The runtime package keeps the official AMD modules intact:
@@ -286,6 +286,11 @@ Select exactly one before creating the private presentation chain. To switch
 owners, resize, or tear down, stop new FG preparation, call `slFSRGQuiesce`,
 retire outstanding inputs, disable the old owner, and recreate the underlying
 swapchain for the new owner.
+
+Setting `FSRGMode::eOff` pauses generation and keeps the viewport's context
+and resources alive, so command lists already recorded stay valid; the next
+`eOn` frame resets history. `slFSRGQuiesce`, `slFreeResources`, swapchain
+destruction, and plugin shutdown destroy them.
 
 When FG is off, use the plain D3D12 presentation path. Skip FG-only capture,
 tags, configuration, evaluation, and latency work; setting an interpolation
