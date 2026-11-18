@@ -101,7 +101,9 @@ if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
     if ($actualArchiveSha256 -cne $archiveSha256) {
         throw "FidelityFX build-tool archive hash mismatch: $actualArchiveSha256"
     }
-    Expand-Archive -LiteralPath $archive -DestinationPath $toolRoot -Force
+    # Expand-Archive breaks on CI runners; System32 tar is bsdtar and reads zip.
+    New-Item -ItemType Directory -Force $toolRoot | Out-Null
+    Invoke-Checked (Join-Path $env:SystemRoot "System32\tar.exe") @("-xf", $archive, "-C", $toolRoot)
 }
 if (-not (Test-Path -LiteralPath $tool -PathType Leaf) -or
     -not (Test-Path -LiteralPath (Join-Path $pixInclude "pix3.h") -PathType Leaf)) {
