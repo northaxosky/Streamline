@@ -78,6 +78,8 @@ extern HRESULT slHookPresent(IDXGISwapChain* swapChain, UINT SyncInterval, UINT 
 extern HRESULT slHookAfterPresent(UINT Flags);
 extern HRESULT slHookPresent1(IDXGISwapChain* swapChain, UINT SyncInterval, UINT Flags, DXGI_PRESENT_PARAMETERS* params, bool& Skip);
 extern HRESULT slHookResizeSwapChainPre(IDXGISwapChain* swapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags, bool& Skip);
+extern sl::Result slCommonFrameEnd(uint32_t presentFlags);
+extern sl::Result slCommonResize();
 
 extern HRESULT slHookCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI_SWAP_CHAIN_DESC* pDesc, IDXGISwapChain** ppSwapChain, bool& Skip);
 extern HRESULT slHookCreateSwapChainForHwnd(IDXGIFactory2* pFactory, IUnknown* pDevice, HWND hWnd, const DXGI_SWAP_CHAIN_DESC1* pDesc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc, IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain, bool& Skip);
@@ -2000,6 +2002,10 @@ SL_EXPORT void* slGetPluginFunction(const char* functionName)
     SL_EXPORT_FUNCTION(slHookPresent1);
     SL_EXPORT_FUNCTION(slHookAfterPresent);
     SL_EXPORT_FUNCTION(slHookResizeSwapChainPre);
+
+    //! Host-called, resolved via slGetFeatureFunction(kFeatureCommon, ...), see sl_common.h
+    SL_EXPORT_FUNCTION(slCommonFrameEnd);
+    SL_EXPORT_FUNCTION(slCommonResize);
     
     //! Vulkan
     SL_EXPORT_FUNCTION(slHookVkPresent);

@@ -70,6 +70,9 @@ struct CommonInterfaceContext
 
     // Present hook health tracking
     std::atomic<uint32_t> evalSinceLastPresent{ 0 };
+    // Hooked D3D12 presents seen; slCommonFrameEnd compares against its last value
+    std::atomic<uint64_t> hookedPresents{ 0 };
+    uint64_t hookedPresentsAtFrameEnd{};
 
     IDXGIAdapter3* adapter{};
 
@@ -770,12 +773,14 @@ HRESULT slHookCreateSwapChainForCoreWindow(IDXGIFactory2* pFactory, IUnknown* pD
 
 HRESULT slHookPresent1(IDXGISwapChain* swapChain, UINT SyncInterval, UINT Flags, DXGI_PRESENT_PARAMETERS* params, bool& Skip)
 {
+    ++ctx.hookedPresents;
     presentCommon(Flags, (void*)swapChain);
     return S_OK;
 }
 
 HRESULT slHookPresent(IDXGISwapChain* swapChain, UINT SyncInterval, UINT Flags, bool& Skip)
 {
+    ++ctx.hookedPresents;
     presentCommon(Flags, (void*)swapChain);
     return S_OK;
 }
@@ -790,6 +795,33 @@ HRESULT slHookResizeSwapChainPre(IDXGISwapChain* swapChain, UINT BufferCount, UI
 {
     CHI_VALIDATE(ctx.compute->clearCache());
     return S_OK;
+}
+
+//! Host-called entry points for presents that bypass Streamline's swap chain
+
+sl::Result slCommonFrameEnd(uint32_t presentFlags)
+{
+    if (presentFlags & DXGI_PRESENT_TEST)
+    {
+        return sl::Result::eOk;
+    }
+
+    const uint64_t hooked = ctx.hookedPresents.load();
+    if (hooked != ctx.hookedPresentsAtFrameEnd)
+    {
+        ctx.hookedPresentsAtFrameEnd = hooked;
+        SL_LOG_ERROR_ONCE("slCommonFrameEnd() called while a Streamline swap chain also presents, the frame advances twice. Call it only for presents outside Streamline.");
+    }
+
+    presentCommon(presentFlags);
+    afterPresentCommon(presentFlags);
+    return sl::Result::eOk;
+}
+
+sl::Result slCommonResize()
+{
+    CHI_VALIDATE(ctx.compute->clearCache());
+    return sl::Result::eOk;
 }
 
 //! VULKAN
